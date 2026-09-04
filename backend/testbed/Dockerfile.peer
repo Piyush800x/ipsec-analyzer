@@ -1,0 +1,91 @@
+# Testbed peer image — implementation-plan step 2.1, LLD §10.
+#
+# One image serves both ends of every tunnel. It carries strongSwan (the tunnel
+# itself), tcpdump (the capture), and every traffic generator the PRD §9.2
+# traffic classes need, because the peers only ever talk to each other: the
+# client and the server for each class both live in this image.
+#
+# Kernel ESP only. The kernel-libipsec plugin would make this image work
+# anywhere, and would make the dataset worthless — see LLD §10.3 and the
+# deletion step below.
+
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+
+# strongSwan and tcpdump are pinned: they determine the cryptography and the
+# packet geometry that Track B learns from, so a silent upgrade mid-dataset
+# would split the corpus in two without anything failing. The generators are
+# recorded at build time (below) rather than pinned — their versions belong in
+# each session's provenance, and pinning them only makes the build brittle when
+# Debian rotates a package out of the mirror.
+ARG STRONGSWAN_VERSION=5.9.8-5+deb12u5
+ARG TCPDUMP_VERSION=4.99.3-1
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        "strongswan-swanctl=${STRONGSWAN_VERSION}" \
+        "strongswan-charon=${STRONGSWAN_VERSION}" \
+        "charon-systemd=${STRONGSWAN_VERSION}" \
+        "libcharon-extra-plugins=${STRONGSWAN_VERSION}" \
+        "libstrongswan-standard-plugins=${STRONGSWAN_VERSION}" \
+        "tcpdump=${TCPDUMP_VERSION}" \
+        iproute2 \
+        iputils-ping \
+        netcat-openbsd \
+        sip-tester \
+        ffmpeg \
+        curl \
+        swaks \
+        iperf3 \
+        python3-minimal \
+        python3-aiosmtpd \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# LLD §10.3: kernel-libipsec must never process ESP in this testbed. Config can
+# be edited; a deleted shared object cannot be loaded by accident, by a package
+# upgrade re-enabling it, or by someone debugging a stubborn container at 2am.
+# Delete it, then prove at build time that it is gone.
+RUN rm -f /usr/lib/ipsec/plugins/libstrongswan-kernel-libipsec.so \
+          /etc/strongswan.d/charon/kernel-libipsec.conf \
+    && ! test -e /usr/lib/ipsec/plugins/libstrongswan-kernel-libipsec.so
+
+# Debian enables every plugin it has a config file for, including several whose
+# shared objects it does not ship. Each one logs a load failure at startup, and
+# a wall of harmless errors is where a real error goes to hide. Drop the config
+# for any plugin with no corresponding shared object.
+RUN set -eu; \
+    for conf in /etc/strongswan.d/charon/*.conf; do \
+        name="$(basename "$conf" .conf)"; \
+        if ! test -e "/usr/lib/ipsec/plugins/libstrongswan-${name}.so"; then \
+            rm -f "$conf"; \
+        fi; \
+    done
+
+COPY image/strongswan-testbed.conf /etc/strongswan.d/00-testbed.conf
+
+# Record what actually went into this image. Every session copies this file into
+# its labels, so a capture generated eight weeks ago can still say which
+# strongSwan produced its packet geometry.
+RUN set -eu; \
+    printf '{\n' > /etc/testbed-versions.json; \
+    for pkg in strongswan-swanctl tcpdump sip-tester ffmpeg curl swaks iperf3; do \
+        ver="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || echo unknown)"; \
+        printf '  "%s": "%s",\n' "$pkg" "$ver" >> /etc/testbed-versions.json; \
+    done; \
+    printf '  "debian": "%s"\n}\n' "$(cat /etc/debian_version)" >> /etc/testbed-versions.json; \
+    cat /etc/testbed-versions.json
+
+# swanctl.conf is written by the orchestrator at run time and loaded with
+# `swanctl --load-all`, so the image ships only an empty directory for it.
+RUN mkdir -p /etc/swanctl/conf.d /captures \
+    && : > /etc/swanctl/swanctl.conf
+
+COPY image/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY image/smtp_sink.py /usr/local/bin/smtp_sink.py
+COPY image/messaging_peer.py /usr/local/bin/messaging_peer.py
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/smtp_sink.py /usr/local/bin/messaging_peer.py
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["charon"]

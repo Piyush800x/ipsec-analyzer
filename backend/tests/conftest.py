@@ -95,3 +95,64 @@ async def engine(backend: str, tmp_path: Path) -> AsyncIterator[AsyncEngine]:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+# --- testbed (Phase 2) -------------------------------------------------------
+#
+# The testbed builds real tunnels in real containers, so its tests need a Docker
+# daemon, a kernel with XFRM, and the peer image built. None of that is present
+# on every machine, so these skip with an explicit reason rather than failing --
+# and, like the PostgreSQL backend above, a skip that CI must not tolerate is
+# turned into a failure by an environment variable.
+
+REQUIRE_TESTBED_ENV = "REQUIRE_TESTBED"
+TESTBED_SLOW_ENV = "TESTBED_SLOW"
+
+
+def _docker_unavailable() -> str | None:
+    """Why the testbed cannot run here, or None if it can."""
+    try:
+        import docker
+    except ImportError:  # pragma: no cover - the testbed group is not installed
+        return "the `testbed` dependency group is not installed (uv sync --all-groups)"
+
+    try:
+        client = docker.from_env()
+        client.ping()
+    except Exception as exc:
+        return f"no reachable Docker daemon: {type(exc).__name__}: {exc}"
+
+    from testbed.peers import PEER_IMAGE
+
+    try:
+        client.images.get(PEER_IMAGE)
+    except Exception:
+        return (
+            f"the peer image {PEER_IMAGE} is not built. Build it with:\n"
+            "  docker build -f testbed/Dockerfile.peer -t "
+            f"{PEER_IMAGE} testbed/"
+        )
+    return None
+
+
+@pytest.fixture(scope="session")
+def testbed_available() -> None:
+    """Skip unless this host can actually build tunnels."""
+    reason = _docker_unavailable()
+    if reason is None:
+        return
+    if os.environ.get(REQUIRE_TESTBED_ENV):
+        pytest.fail(f"{REQUIRE_TESTBED_ENV} is set but the testbed cannot run: {reason}")
+    pytest.skip(reason)
+
+
+@pytest.fixture
+def testbed_slow(testbed_available: None) -> None:
+    """Skip the multi-minute testbed tests unless they are asked for.
+
+    The 20-iteration leak check and the 10-session batch are the honest way to
+    demonstrate steps 2.3 and 2.10, and they take long enough that running them
+    on every `pytest` invocation would train people to stop running `pytest`.
+    """
+    if not os.environ.get(TESTBED_SLOW_ENV):
+        pytest.skip(f"set {TESTBED_SLOW_ENV}=1 to run the slow testbed tests")

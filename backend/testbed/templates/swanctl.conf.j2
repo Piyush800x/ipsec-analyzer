@@ -1,0 +1,94 @@
+{#-
+  swanctl.conf for one testbed peer. Implementation-plan step 2.2, LLD 10.1.
+
+  Rendered once per side from a single SessionConfig, so both ends are derived
+  from the same object and cannot disagree about the proposal they are meant to
+  negotiate. A mismatch here does not fail loudly -- it fails as a tunnel that
+  never establishes, twenty minutes into a batch run.
+
+  strongSwan parses one setting per line. Collapsing `auth = psk` and `id = ...`
+  onto one line is accepted by the tokeniser and then rejected as
+  "invalid value for: auth", which reads like a value problem rather than a
+  layout one. Keep one setting per line.
+-#}
+connections {
+
+    {{ conn_name }} {
+        version = {{ 1 if ike_version == "ikev1" else 2 }}
+        local_addrs = {{ local_addr }}
+        remote_addrs = {{ remote_addr }}
+        proposals = {{ ike_proposal }}
+{% if aggressive %}
+        # IKEv1 aggressive mode. The PSK hash is exposed to a passive observer,
+        # which is the whole point of including it in the matrix: it is what the
+        # weak-reference tunnel of PRD 16 demonstrates, and ATT&CK T1110 is
+        # asserted against it.
+        aggressive = yes
+{% endif %}
+
+        # Explicit, because the default is to retry forever. A configuration
+        # that cannot negotiate must fail while the orchestrator is still
+        # watching (step 2.4), not sit retransmitting until the capture window
+        # closes and leaves a PCAP full of retries labelled as a working tunnel.
+        keyingtries = 1
+
+        # IKE SA lifetime. Negotiated and therefore observable on IKEv1; on
+        # IKEv2 this is local policy only and no parser can recover it
+        # (RFC 7296, LLD 6.4).
+        rekey_time = {{ lifetime_s }}s
+
+        # strongSwan jitters rekeying by up to over_time, which defaults to 10%
+        # of rekey_time -- exactly the tolerance step 9.3 measures against. Zero
+        # jitter makes the observed rekey interval a reproducible property of
+        # the configuration rather than a coin flip. Real deployments do jitter;
+        # a labelled dataset should not.
+        rand_time = 0s
+
+        local {
+            auth = psk
+            id = {{ local_id }}
+        }
+        remote {
+            auth = psk
+            id = {{ remote_id }}
+        }
+
+        children {
+            {{ child_name }} {
+                local_ts = {{ local_ts }}
+                remote_ts = {{ remote_ts }}
+                esp_proposals = {{ esp_proposal }}
+                mode = {{ mode }}
+
+                # The orchestrator initiates explicitly and then asserts the SA
+                # is up before generating any traffic. Auto-starting would race
+                # the capture and put the IKE exchange outside the PCAP.
+                start_action = none
+
+                rekey_time = {{ lifetime_s }}s
+                rand_time = 0s
+
+                # Rekey on time only. A byte- or packet-triggered rekey would
+                # make the observed rekey interval depend on the traffic class,
+                # which is precisely the confound step 9.3 must not have.
+                rekey_bytes = 0
+                rekey_packets = 0
+            }
+        }
+    }
+}
+
+secrets {
+
+    ike-testbed {
+        id-0 = {{ local_id }}
+        id-1 = {{ remote_id }}
+        # IKEv1 main mode cannot know the peer identity until message 5, which
+        # is already encrypted, so the responder has to find the PSK by address.
+        # Listing both addresses alongside both identities makes one secrets
+        # block serve main mode, aggressive mode and IKEv2 alike.
+        id-2 = {{ local_addr }}
+        id-3 = {{ remote_addr }}
+        secret = "{{ psk }}"
+    }
+}

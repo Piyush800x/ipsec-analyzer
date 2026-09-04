@@ -89,6 +89,44 @@ jobs:
           uv run alembic upgrade head
           uv run alembic downgrade base
 
+  testbed:
+    name: Testbed (real tunnels)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-groups
+
+      # XFRM state is network-namespace scoped, which is what lets two
+      # containers hold independent SAs. The modules are not loaded on a fresh
+      # runner and a container cannot load them for itself.
+      - name: Load kernel IPsec modules
+        run: sudo modprobe esp4 esp6 ah4 ah6 xfrm_user af_key
+
+      - name: Build the peer image
+        run: docker build -f testbed/Dockerfile.peer -t ipsec-testbed-peer:0.1.0 testbed/
+
+      # REQUIRE_TESTBED turns "no daemon, no XFRM, no image" from a skip into a
+      # failure. Phase 2 is the source of every label the later phases are
+      # measured against, so a testbed that silently never ran would leave a
+      # green build proving nothing about it. The slow tests -- twenty-iteration
+      # leak checks and batch resume cycles -- stay opt-in via TESTBED_SLOW.
+      - name: pytest (testbed)
+        env:
+          REQUIRE_TESTBED: "1"
+        run: uv run pytest tests/test_testbed_*.py
+
   frontend:
     name: Frontend (types, lint, build)
     runs-on: ubuntu-latest

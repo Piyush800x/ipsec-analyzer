@@ -17,6 +17,205 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Added — Phase 2, testbed
+
+Implementation-plan steps 2.1–2.10, plus the two Phase 0 spikes (0.1, 0.2) they
+depend on, which had not been run.
+
+**0.1, 0.2 De-risking spikes**
+- Kernel IPsec in Docker works on this host. Two containers on a user-defined
+  bridge, an IKEv2 tunnel between them, ESP on the wire during a ping across the
+  protected subnets.
+- The packet-geometry premise of [LLD §7.2](docs/LLD.md) holds: for an
+  AES-CBC-128 + SHA1 tunnel, `(esp_len - 16 - 12) % 16 == 0` for **60 of 60**
+  captured packets, across two distinct payload sizes. The cipher-family sieve
+  of step 9.2 can be built as designed.
+- Both are now standing checks — [manualtesting.md](manualtesting.md) MT-12 —
+  rather than a spike somebody remembers doing.
+
+**2.1 Peer container image** — `testbed/Dockerfile.peer`
+- One image serves both ends: strongSwan, tcpdump, and every generator the seven
+  PRD §9.2 classes need, because the peers only ever talk to each other.
+- **`kernel-libipsec` is deleted from the image**, and the build fails if it
+  survives. It ships in Debian's `libcharon-extra-plugins` and would have loaded
+  silently. [LLD §10.3](docs/LLD.md) is emphatic about why: Track B's entire
+  feature set is packet geometry, and userspace ESP need not reproduce the
+  kernel's padding, IV placement or MTU behaviour. Config can be edited; a
+  deleted shared object cannot be loaded at 2am by someone debugging a stubborn
+  host.
+- strongSwan 5.9.8 and tcpdump 4.99.3 pinned and recorded in `pyproject.toml`
+  beside the tshark pin, for the same reason: between them they decide the
+  cryptography and the packet geometry the models learn from, so a silent
+  upgrade mid-dataset would split the corpus in two with nothing failing. Every
+  session copies `/etc/testbed-versions.json` into its labels.
+- Aggressive-mode PSK is enabled, deliberately and only here. strongSwan refuses
+  the combination by default because it exposes the PSK hash to a passive
+  observer — which is exactly the weakness `ikev1-aggressive` exists in the
+  matrix to generate, and what the weak-reference demo tunnel is built on.
+
+**2.2 Config templating** — `testbed/config.py`, `render.py`, `templates/`
+- `SessionConfig` is frozen and is both the input and the ground truth, so a
+  config cannot be mutated between rendering and labelling.
+- Matrix labels (`aes128gcm16`) and contract values (`EncryptionAlg.AES_GCM_16`
+  plus a key length) are kept explicitly apart, with one mapping table between
+  them. Conflating the two is how a dataset ends up mislabelled.
+- Both sides render from one config, so the two ends of a tunnel cannot disagree
+  about what they are negotiating — a failure that surfaces not as an error but
+  as a tunnel that never establishes, twenty minutes into a batch.
+
+**2.3 Peer lifecycle** — `testbed/peers.py`
+- `peer_pair()` creates the network and both containers with fixed addresses and
+  destroys everything on the way out, including on exception and cancellation.
+  Cleanup failures are logged, never raised: they must not mask the exception
+  that caused them.
+- Every resource is labelled, and `prune_orphans()` cleans up after a process
+  that was killed outright and never ran its `finally`.
+- `preflight()` checks kernel XFRM before a batch rather than halfway through
+  one, with the modprobe incantation in the error text. The failure it catches
+  otherwise looks like a configuration bug and costs a day.
+
+**2.4 Bring-up and the assertion** — `testbed/tunnel.py`
+- `assert_sa_established()` requires both an ESTABLISHED IKE SA and an INSTALLED
+  Child SA. LLD §10.2 calls this guard non-negotiable and it is: without it, a
+  failed negotiation produces a capture full of retries carrying a label that
+  says it is a working tunnel.
+- Errors name the proposals, the mode, and the responder's log, because the
+  initiator only ever sees `AUTHENTICATION_FAILED`.
+- `bring_up_tunnel(..., responder_cfg=...)` configures the far end differently.
+  A normal session never uses it; it is the only way to exercise the guard, and
+  step 4.4 will need it to build a peer offering 3DES alongside AES-256.
+
+**2.5 Capture wrapper** — `testbed/capture.py`
+- `start_tcpdump()` waits for tcpdump to report *listening* before returning, so
+  the IKE exchange initiated moments later is inside the capture.
+- `stop()` sends SIGINT rather than SIGKILL, waits for the process to actually
+  finish, and **refuses to return an empty capture**. An empty PCAP beside a
+  valid `labels.json` is worse than a failed session: the batch reports success
+  and the row poisons whatever is trained on it.
+
+**2.6 Traffic generators** — `testbed/traffic/`
+- One module per class. Each commits to the distinguishing shape of its class
+  rather than approximating all seven with a parameterised stream, because two
+  classes that look alike here will look alike to the classifier in step 9.7.
+- Measured over 25-second sessions, every class separates on packet rate and on
+  at least one of size, directionality or idle structure — the table is in
+  MT-13. `voip` and `icmp` deliberately produce very few distinct ESP lengths;
+  that is what makes `sufficient_for_lattice` false for them in step 3.6, which
+  is the honest-failure case the demo is built around.
+
+**2.7 Ground truth** — `SessionConfig.to_ground_truth()`
+- `labels.json` keeps three things apart: `dimensions` (what the matrix chose),
+  `expected` (what a correct parser should report, keyed by
+  `SecurityAssociation` field), and **`not_observable_from_ike`** (the fields no
+  parser can recover from this capture, with the reason).
+- That third block is load-bearing. Without it, step 8.2 would flag a parser
+  correctly reporting `UNAVAILABLE` for an IKEv2 lifetime as a mismatch, and the
+  obvious way to turn the harness green would be to teach the parser to guess.
+
+**2.8 Session runner** — `testbed/orchestrator.py`
+- `run_session()` in the LLD §10.2 order, with the teardown inside the capture
+  window so the IKE DELETE exchange is recorded, and the result verified rather
+  than assumed: IKE packets are counted before and after the teardown.
+- Nothing is written to the output directory until the capture is proven
+  non-empty, so a failed session leaves no half-written row.
+
+**2.9 Matrix and sampler** — `testbed/matrix.yaml`, `sampler.py`
+- The LLD §10.1 matrix, and a deterministic covering-array sampler: **60
+  configurations** covering all 257 pairs, from a cross-product of 3360.
+- Every value of every dimension appears; re-running with the same seed produces
+  an identical list, which the resume manifest depends on.
+
+**2.10 Batch orchestrator** — `testbed/batch.py`
+- `run_batch()` with a manifest rewritten after every session, resume, and
+  per-session failure isolation. `python -m testbed.batch <dir>` is the entry
+  point.
+- A session counts as done only when the manifest records it **and** its capture
+  and labels are still on disk. A manifest can outlive the files it describes,
+  and a resume that trusted it alone would produce a dataset with holes that
+  nothing reports.
+
+**Testing**
+- 85 automated tests: config and ground truth, rendering, sampling, manifest and
+  resume logic (no Docker), plus Docker-backed tests for each **Done when**.
+- A new `testbed` CI job builds the peer image, loads the kernel modules and
+  runs them with `REQUIRE_TESTBED=1`, so a testbed that silently never ran
+  cannot leave a green build. Slow tests stay opt-in behind `TESTBED_SLOW=1`.
+- `manualtesting.md` MT-12, MT-13, MT-14.
+
+### Verified
+
+- All 25 Docker-backed testbed tests pass, including the 20-iteration
+  container-leak check and all seven traffic generators.
+- Both LLD §10.1 reference fixtures negotiate: `weak-reference` establishes
+  3DES_CBC/HMAC_SHA1_96/PRF_HMAC_SHA1/MODP_1024 over IKEv1 aggressive mode in
+  transport mode; `hardened-reference` establishes
+  AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_256 with AES_GCM_16-256
+  ESP in tunnel mode.
+- A mismatched PSK fails in seconds with a message naming the proposals, and
+  leaves no established SA.
+- ESP on the wire is raw IP protocol 50, not UDP-encapsulated, and the LLD §7.2
+  congruence holds for every captured packet.
+- A 10-session batch `SIGKILL`ed after 7 sessions: manifest intact, resume
+  cleaned up the 2 orphaned containers and 1 network the kill left behind,
+  skipped exactly those 7, ran the remaining 3, finished with zero orphans.
+- IPv4 and IPv6 sessions both complete; `docker compose`-free, all through the
+  Docker SDK.
+- Ruff, ruff-format and mypy strict clean across `analyzer` and `testbed`.
+
+### Not verified
+
+- **The `testbed` CI job has not run on GitHub Actions.** It passes locally via
+  `./scripts/ci-local.sh testbed`. Whether an Actions runner permits
+  `modprobe esp4` and `NET_ADMIN` containers is untested; if it does not, the
+  job needs either a privileged step or removal, and Phase 2 falls back to being
+  verified locally only.
+- **Step 2.6 at full duration.** The generator profiles were measured over
+  25-second sessions, not the 180 seconds the matrix specifies. Rates and shapes
+  should hold; absolute packet counts will not.
+- **Step 2.9 at scale.** The sampler produces 60 configurations, but no full
+  60-session batch has been run end to end — the longest is 10. That is step 8.1.
+
+### Deviations from the specs
+
+- **`guarantee_full_coverage` is read as full-strength coverage across those
+  dimensions**, not merely as a promise that each value appears. Plain greedy
+  all-pairs covers this matrix in 37 rows, below the 40–60 that step 2.9
+  specifies, and covers `mode`, `esp`, `pfs` and `ike` only in pairs — so there
+  would be no 3DES-with-PFS-on-IKEv2 row unless the greedy step happened to want
+  one. Those four are exactly what Track A parses and the policy scores. Reading
+  the key the way covering-array tools read it gives all 60 of their
+  combinations, covers all 257 pairs, and lands inside the planned range.
+- **The IKE proposal is CBC-plus-HMAC even for the AEAD suites.** IKEv1 cannot
+  negotiate an AEAD cipher for Phase 1, so deriving the IKE proposal from the
+  ESP suite would make every `ikev1` × `gcm` cell of the matrix fail to
+  negotiate. ESP still carries the AEAD. This is also how a great many real
+  deployments are configured.
+- **Rekey jitter is disabled** (`rand_time = 0`). strongSwan jitters by up to
+  10% of `rekey_time` by default — exactly the tolerance step 9.3 measures
+  against. Real deployments do jitter; a labelled dataset should not.
+- **`testbed/` gained six modules** the LLD §2 tree does not list (`config.py`,
+  `peers.py`, `tunnel.py`, `capture.py`, `sampler.py`, `batch.py`). §2 lists
+  `orchestrator.py` alone; the lifecycle, capture and sampling concerns are
+  genuinely separate and testable apart.
+- **Captures are filtered** to `esp or ah or udp port 500 or udp port 4500`.
+  The peers also emit ARP, neighbour discovery and multicast chatter that has
+  nothing to do with the tunnel, and a model trained on unfiltered captures
+  would have that container noise available as signal.
+
+### Open spec questions
+
+6. **The matrix has no NAT dimension.** ESP here is raw protocol 50 because the
+   peers share a bridge and no NAT is detected, so nothing in the dataset
+   exercises UDP-encapsulated ESP. Step 4.7 must parse NAT-T and step 3.3 must
+   disambiguate IKE from ESP on port 4500, and neither will have testbed data to
+   work from. Either the matrix needs a `nat` dimension or those steps need
+   captures from elsewhere.
+7. **`SessionConfig.duration_s` versus PRD §9.3.** The matrix specifies 180
+   seconds per session and ≥200 sessions; 60 configurations at 180 seconds is
+   about 3 hours of tunnel time before traffic-run multiplicity. Step 8.3
+   budgets 8 hours, so this fits — but the number of traffic runs per
+   configuration is specified nowhere.
+
 ### Added
 
 - `README.md` — what the project is, the two-track thesis, honest current status,

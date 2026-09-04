@@ -25,7 +25,8 @@ this file records what was confirmed to work.
 |---|---|
 | [uv](https://docs.astral.sh/uv/) | everything backend |
 | Node 22+ | frontend |
-| Docker Desktop **running** | MT-02, MT-05, MT-06, MT-07 |
+| Docker Desktop **running** | MT-02, MT-05, MT-06, MT-07, MT-12, MT-13, MT-14 |
+| Kernel IPsec modules loaded | MT-12, MT-13, MT-14 — see MT-12 |
 | A Neon connection string | MT-08 only |
 
 ```bash
@@ -59,6 +60,9 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-09 | Per-developer Neon branch reachable | 0.5 | — | **Not run** |
 | MT-10 | Demo fixtures are honest | 1.4 | 2026-09-04 | Pass |
 | MT-11 | `startup.md` works as written | onboarding | 2026-09-04 | Pass |
+| MT-12 | Testbed builds a real kernel-ESP tunnel | 0.1, 0.2, 2.1 | 2026-09-04 | Pass |
+| MT-13 | The seven traffic classes look different | 2.6 | 2026-09-04 | Pass |
+| MT-14 | A batch resumes where it was killed | 2.10 | 2026-09-04 | Pass |
 
 ---
 
@@ -384,6 +388,196 @@ guide is wrong and needs fixing rather than working around.
 > failed for anyone following the guide. Every migration run during Phase 1 had
 > passed the URL on the command line, which is the one path that always worked.
 > This is exactly what MT-11 exists to catch.
+
+---
+
+## MT-12 — The testbed builds a real kernel-ESP tunnel
+
+**Proves** steps 0.1, 0.2 and 2.1, and the LLD §10.3 constraint underneath all
+of Phase 2. If ESP is being processed in userspace, every capture in the dataset
+is subtly wrong in exactly the dimensions Track B learns from, and nothing else
+in the project will tell you.
+
+Kernel XFRM state is namespace-scoped but the modules are not. Load them once
+per boot. On Linux:
+
+```bash
+sudo modprobe esp4 esp6 ah4 ah6 xfrm_user af_key
+```
+
+Under Docker Desktop they belong to the VM, not to your machine:
+
+```bash
+docker run --rm --privileged --pid=host alpine \
+  nsenter -t 1 -m -u -n -i modprobe esp4 esp6 ah4 ah6 xfrm_user af_key
+```
+
+Then:
+
+```bash
+cd backend
+docker build -f testbed/Dockerfile.peer -t ipsec-testbed-peer:0.1.0 testbed/
+REQUIRE_TESTBED=1 uv run pytest tests/test_testbed_docker.py -v
+```
+
+**Expect** every test to pass and none to skip. A skip means the daemon, the
+kernel modules or the image is missing; `REQUIRE_TESTBED=1` turns that into a
+failure naming which one.
+
+Confirm by eye that the ESP is real rather than emulated:
+
+```bash
+docker run --rm --entrypoint sh ipsec-testbed-peer:0.1.0 \
+  -c 'ls /usr/lib/ipsec/plugins/ | grep -c libipsec'
+```
+
+**Expect** `0`. If a `kernel-libipsec` plugin is ever present in this image,
+stop and read [LLD §10.3](docs/LLD.md) before doing anything else. Do not enable
+it to make a stubborn host work — move to VMs instead.
+
+**The packet-geometry check** is step 0.2, and it validates the premise of
+LLD §7.2 before the cipher detector is built on top of it. Run one session and
+check the ESP payload lengths of an AES-CBC + SHA1 tunnel:
+
+```bash
+uv run python - <<'PY'
+import asyncio, struct
+from pathlib import Path
+from analyzer.core.enums import OperatingMode, TrafficClass
+from testbed.config import EspSuite, IkeFlavour, SessionConfig
+from testbed.orchestrator import run_session
+
+cfg = SessionConfig(name="geometry", mode=OperatingMode.TUNNEL,
+                    ike=IkeFlavour.IKEV2, esp=EspSuite.AES128_SHA1, dh=14,
+                    pfs=True, traffic=TrafficClass.ICMP, duration_s=15)
+result = asyncio.run(run_session(cfg, Path("/tmp/mt12")))
+
+data = result.pcap.read_bytes()
+magic = struct.unpack("<I", data[:4])[0]
+endian = "<" if magic in (0xa1b2c3d4, 0xa1b23c4d) else ">"
+off, lengths = 24, []
+while off + 16 <= len(data):
+    _, _, caplen, _ = struct.unpack(endian + "IIII", data[off:off + 16])
+    off += 16
+    pkt, off = data[off:off + caplen], off + caplen
+    if len(pkt) < 34 or struct.unpack("!H", pkt[12:14])[0] != 0x0800:
+        continue
+    ip = pkt[14:]
+    if ip[9] != 50:
+        continue
+    lengths.append(struct.unpack("!H", ip[2:4])[0] - (ip[0] & 0x0F) * 4 - 8)
+
+bad = [n for n in lengths if (n - 16 - 12) % 16 != 0]
+print(len(lengths), "ESP packets,", len(bad), "violating (len - IV - ICV) % 16 == 0")
+print("distinct lengths:", sorted(set(lengths)))
+PY
+```
+
+**Expect** zero violations. A violation means the ESP on the wire is not what
+LLD §7.2 assumes, and step 9.2 cannot be built as designed.
+
+> Last verified 2026-09-04 · Pass. WSL2 kernel 6.18.33.2, strongSwan 5.9.8.
+> 60 ESP packets across two distinct lengths, congruence held for every one.
+> `kernel-libipsec` absent from the image; charon loads `kernel-netlink`.
+
+---
+
+## MT-13 — The seven traffic classes look different
+
+**Proves** step 2.6. The **Done when** says to eyeball it, and it means it: two
+classes that look alike here will look alike to the classifier in step 9.7, and
+discovering that in week nine is far more expensive than discovering it now.
+
+```bash
+cd backend
+uv run python - <<'PY'
+import asyncio
+from pathlib import Path
+from analyzer.core.enums import OperatingMode, TrafficClass
+from testbed.config import EspSuite, IkeFlavour, SessionConfig
+from testbed.orchestrator import run_session
+
+out = Path("/tmp/mt13")
+for traffic in TrafficClass:
+    cfg = SessionConfig(name=f"profile-{traffic.value}", mode=OperatingMode.TUNNEL,
+                        ike=IkeFlavour.IKEV2, esp=EspSuite.AES128_SHA1, dh=14,
+                        pfs=True, traffic=traffic, duration_s=25)
+    result = asyncio.run(run_session(cfg, out))
+    print(f"{traffic.value:14s} {result.packet_count:7d} packets")
+PY
+```
+
+Then open two or three captures in Wireshark — **Statistics → I/O Graph** and
+**Statistics → Packet Lengths** — and confirm each class looks like its
+description in the table at the top of `testbed/traffic/base.py`.
+
+**Expect** clear separation on at least two axes per class. From the last run,
+over 25-second sessions:
+
+| class | pkt/s | mean bytes | distinct sizes | one-directional | idle gaps > 1s |
+|---|---|---|---|---|---|
+| messaging | 1.0 | 131 | 8 | no | 7 |
+| icmp | 9.9 | 348 | 2 | no | 0 |
+| voip | 110 | 221 | 4 | no | 0 |
+| email | 116 | 1177 | 13 | 81% | 2 |
+| video | 204 | 1023 | 75 | 100% | 0 |
+| web | 288 | 764 | 9 | no | 10 |
+| file_transfer | 2721 | 1004 | 7 | 67% | 0 |
+
+**If two classes look alike**, fix the generator, not the classifier.
+
+Note that `voip` and `icmp` produce very few distinct ESP lengths. That is
+correct and deliberate: it is what makes `sufficient_for_lattice` false for them
+in step 3.6, which is the honest-failure case the whole demo is built around.
+
+> Last verified 2026-09-04 · Pass. Every class separable on packet rate and on
+> at least one of size, directionality or idle structure.
+
+---
+
+## MT-14 — A batch resumes where it was killed
+
+**Proves** step 2.10. Dataset generation (step 8.3) is an eight-hour unattended
+job. Laptops sleep and SSH sessions drop, and a batch that cannot resume turns
+one interruption into a lost day.
+
+```bash
+cd backend
+rm -rf /tmp/mt14
+uv run python -m testbed.batch /tmp/mt14 --limit 10 --duration 10 &
+sleep 90 && kill %1          # kill it partway through
+cat /tmp/mt14/manifest.json  # must still parse
+uv run python -m testbed.batch /tmp/mt14 --limit 10 --duration 10
+```
+
+**Expect** the second invocation to log `already done, skipping` for each
+session the manifest records as completed, and to run only the remainder. The
+manifest must parse after the kill — it is written to a sibling and moved into
+place precisely so a process killed mid-write leaves the previous one intact.
+
+Then confirm nothing was left behind:
+
+```bash
+docker ps -a --filter label=ipsec-analyzer.testbed
+docker network ls --filter label=ipsec-analyzer.testbed
+```
+
+**Expect** both empty. A killed process never runs its `finally`, so the next
+`run_batch` prunes orphans on startup. If these are *not* empty after the second
+invocation, that pruning is broken, and a long batch will exhaust the address
+pools of the daemon with a symptom — "all predefined address pools have been
+fully subnetted" — that says nothing about the cause.
+
+> Last verified 2026-09-04 · Pass. A 10-session batch was `SIGKILL`ed after 7
+> sessions. The manifest still parsed; the hard kill left 2 orphaned containers
+> and 1 network behind, as expected, since `SIGKILL` runs no `finally`. The
+> resume cleaned all three up, skipped exactly those 7, ran the remaining 3, and
+> finished with zero orphans. Separately, 20 `peer_pair` cycles leaked nothing
+> (`TESTBED_SLOW=1 pytest -k NoResourceLeaks`).
+>
+> Note: pipe the batch to a file, not to `head`. Truncating the pipe sends
+> `SIGPIPE` to the batch mid-session and produces a spurious "cannot exec in a
+> stopped container" failure that looks like a testbed bug and is not one.
 
 ---
 

@@ -41,6 +41,11 @@ captures/
 # Datasets and model artefacts are DVC-tracked, not git-tracked
 dataset/**/*.pcap
 dataset/**/*.pcapng
+# Generated sessions: a batch run writes a labels.json and a manifest.json
+# beside every capture, and 200 of those would otherwise land in a `git add -A`
+# even though the captures beside them are ignored. Step 8.4 puts the whole
+# tree under DVC.
+dataset/sessions/
 backend/models/*.pkl
 backend/models/*.joblib
 backend/models/*.onnx

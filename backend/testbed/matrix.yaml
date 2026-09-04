@@ -1,0 +1,61 @@
+# Testbed configuration matrix. LLD section 10.1, implementation-plan step 2.9.
+#
+# The full cross-product is 2 x 3 x 5 x 4 x 2 x 2 x 7 = 3360 configurations. At
+# three minutes each that is a week of wall clock for a dataset whose extra
+# 3300 rows would be near-duplicates. Pairwise sampling covers every pair of
+# values from every pair of dimensions in 40-60 configurations, which is where
+# the interactions actually live, and multiple traffic runs per configuration
+# then reach the 200-session target of PRD section 9.3.
+#
+# The vocabulary here is the matrix vocabulary, not the product contract:
+# `filexfer` rather than `file_transfer`, `ikev1-aggressive` rather than a
+# version plus an exchange mode. testbed/config.py owns the translation.
+
+version: "1.0"
+
+defaults:
+  duration_s: 180
+  lifetime_s: 3600
+  peers:
+    left: 10.10.0.2
+    right: 10.10.0.3
+
+dimensions:
+  mode: [tunnel, transport]
+  ike: [ikev1-main, ikev1-aggressive, ikev2]
+  esp: [aes128-sha1, aes256-sha256, aes128gcm16, aes256gcm16, 3des-sha1]
+  dh: [2, 14, 19, 20]
+  pfs: [true, false]
+  ip: [v4, v6]
+  traffic: [icmp, web, voip, video, email, filexfer, messaging]
+
+sampling:
+  strategy: pairwise
+  # Pairwise already guarantees that every value of every dimension appears, so
+  # this list does not change the result. It records which dimensions the
+  # dataset would be unusable without, and the sampler asserts them explicitly
+  # rather than trusting that property of the algorithm.
+  guarantee_full_coverage: [mode, esp, pfs, ike]
+  seed: 20260903
+
+# The two reference tunnels of PRD section 16. They are generated regardless of
+# what the sampler picks, because the demo depends on them existing and neither
+# is guaranteed to fall out of a pairwise sample.
+fixtures:
+  - name: weak-reference
+    mode: transport
+    ike: ikev1-aggressive
+    esp: 3des-sha1
+    dh: 2
+    pfs: false
+    lifetime_s: 86400
+    traffic: voip
+
+  - name: hardened-reference
+    mode: tunnel
+    ike: ikev2
+    esp: aes256gcm16
+    dh: 19
+    pfs: true
+    lifetime_s: 3600
+    traffic: voip

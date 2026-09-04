@@ -23,6 +23,12 @@ dev = [
     "mypy>=1.13",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "types-pyyaml>=6.0.12.20260815",
+]
+testbed = [
+    "docker>=7.2.0",
+    "jinja2>=3.1.6",
+    "pyyaml>=6.0.3",
 ]
 
 [tool.ipsec-analyzer.external-tools]
@@ -30,6 +36,13 @@ dev = [
 # break the Track A parser. The Dockerfile installs exactly this version and
 # tests/test_tshark_version.py asserts the running binary matches.
 tshark = "4.4.18"
+# Testbed peer image (step 2.1). strongSwan decides the cryptography and
+# tcpdump the capture, so both determine the packet geometry Track B learns
+# from. A silent upgrade mid-dataset would split the corpus in two with
+# nothing failing. testbed/Dockerfile.peer installs exactly these and
+# tests/test_testbed_image.py asserts the built image matches.
+strongswan = "5.9.8-5+deb12u5"
+tcpdump_testbed = "4.99.3-1"
 
 [build-system]
 requires = ["hatchling"]
@@ -69,22 +82,35 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ARG001"]
+"tests/*" = ["ARG001", "ARG002"]
+# testbed/image/ holds programs that run inside the peer container, not backend
+# modules. They are standalone CLIs whose progress output on stderr is the point,
+# and they are executed by the container Python, never imported by the backend.
+"testbed/image/*" = ["T201"]
 "alembic/versions/*" = ["E501", "N999"]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
+# `testbed` is a top-level package alongside `analyzer` rather than living under
+# src/, so isort guesses it is third-party and sorts it above the imports it
+# belongs beside.
+known-first-party = ["analyzer", "testbed"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
-mypy_path = "src"
-packages = ["analyzer"]
+mypy_path = "src:."
+packages = ["analyzer", "testbed"]
+# testbed/image/ runs inside the peer container, against that container's
+# interpreter and its dependencies (aiosmtpd), which are deliberately not
+# backend dependencies. Type-checking them here would mean installing the
+# container's requirements into the backend environment to satisfy a checker.
+exclude = "^testbed/image/"
 
 [[tool.mypy.overrides]]
-module = ["uuid6.*"]
+module = ["uuid6.*", "docker.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -94,5 +120,6 @@ addopts = "-q --strict-markers"
 markers = [
     "postgres: requires a live PostgreSQL server (set TEST_POSTGRES_URL)",
     "neon: requires a live Neon pooled endpoint (set NEON_POOLED_URL)",
-    "docker: requires a running Docker daemon",
+    "docker: requires a running Docker daemon and the built peer image",
+    "slow: takes minutes; opt in with TESTBED_SLOW=1",
 ]
