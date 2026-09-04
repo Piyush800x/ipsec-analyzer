@@ -39,21 +39,40 @@ target_metadata = Base.metadata
 
 
 def database_url() -> str:
-    """The URL migrations run against.
+    """The URL migrations run against. Direct endpoint first.
 
-    Direct endpoint first. Raising rather than defaulting is deliberate: a
-    default would silently migrate the wrong database, and "which database did
-    that DDL land on" is not a question anyone wants to answer after the fact.
+    Two sources, in this order:
+
+    1. ``DATABASE_URL_DIRECT`` or ``DATABASE_URL`` straight from the process
+       environment. CI sets these per step, and a one-off
+       ``DATABASE_URL_DIRECT=... alembic upgrade head`` has to keep working
+       without touching anyone's ``.env``.
+    2. ``core.config``, which reads ``.env`` and validates the URL. Without this
+       fallback, a developer who has configured ``.env`` exactly as
+       ``startup.md`` describes still gets "DATABASE_URL is not set" from
+       Alembic, because ``os.environ`` never sees a dotenv file.
+
+    Raising rather than defaulting is deliberate: a default would silently
+    migrate the wrong database, and "which database did that DDL land on" is not
+    a question anyone wants to answer after the fact.
     """
     url = os.environ.get("DATABASE_URL_DIRECT") or os.environ.get("DATABASE_URL")
-    if not url:
+    if url:
+        return url
+
+    from analyzer.core.config import ConfigurationError, get_settings
+
+    try:
+        return get_settings().migration_url
+    except ConfigurationError as exc:
         msg = (
-            "Neither DATABASE_URL_DIRECT nor DATABASE_URL is set. Alembic needs "
-            "the DIRECT Neon endpoint (the host without '-pooler'), or a SQLite "
-            "URL for offline work. See .env.example and docs/database-setup.md."
+            "Alembic has no database URL. Set DATABASE_URL_DIRECT (the DIRECT "
+            "Neon endpoint -- the host without '-pooler'), or configure .env as "
+            "described in startup.md section 3. For offline work "
+            "'sqlite+aiosqlite:///./data/analyzer.db' is enough.\n\n"
+            f"{exc}"
         )
-        raise RuntimeError(msg)
-    return url
+        raise RuntimeError(msg) from exc
 
 
 def render_item(

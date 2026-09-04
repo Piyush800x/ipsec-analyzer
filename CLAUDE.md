@@ -10,6 +10,13 @@ Authoritative specifications live in [docs/](docs/):
 
 When this file and the specs disagree, the specs win — and the disagreement is a bug in this file.
 
+Two living records track what has actually happened, as opposed to what was planned:
+
+- [CHANGELOG.md](CHANGELOG.md) — what landed, per plan step, plus deviations from the
+  specs and open spec questions.
+- [manualtesting.md](manualtesting.md) — the checks a person runs by hand, with the date
+  and result of the last run.
+
 ---
 
 ## Language and tooling
@@ -102,3 +109,11 @@ JSON (NFR-4). Timestamps and IDs are injected by the caller, not read inside the
 - Do not build ahead of the plan. Later phases depend on decisions that have not been made.
 - Honest gaps beat confident guesses. `UNAVAILABLE` with a reason is a correct answer;
   a plausible-looking fabricated value is a defect.
+
+- **Every completed phase or feature updates both records, in the same commit as the
+  change.** [CHANGELOG.md](CHANGELOG.md) gets what the step delivers, anything that could
+  not be demonstrated under *Not verified*, and any divergence from the specs under
+  *Deviations*. [manualtesting.md](manualtesting.md) gets a new `MT-NN` procedure for
+  anything a person must confirm by eye — a rendered view, a container's contents, a
+  migration against a real server — and a row in its status table. An entry written later
+  is an entry written from memory.
