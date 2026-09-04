@@ -1,0 +1,21 @@
+# Normalise to LF in the repository and in the working tree. Keeps .editorconfig,
+# Ruff, and CI byte-identical across Windows, macOS, and Linux checkouts, and
+# stops core.autocrlf from rewriting files under contributors' feet.
+* text=auto eol=lf
+
+# Binary — never touch
+*.pcap    binary
+*.pcapng  binary
+*.pdf     binary
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.woff2   binary
+*.pkl     binary
+*.joblib  binary
+*.onnx    binary
+*.pt      binary
+
+# Lockfiles: LF, and collapse them in diffs
+uv.lock           linguist-generated=true
+package-lock.json linguist-generated=true

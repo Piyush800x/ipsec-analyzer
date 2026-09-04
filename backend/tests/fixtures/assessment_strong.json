@@ -1,0 +1,314 @@
+{
+  "schema_version": "1.0",
+  "assessment_id": "01a066a0-ba4e-76d9-8d5e-6f708192a3b4",
+  "capture_id": "01a0669b-97d5-7a15-bc4d-5e6f708192a3",
+  "generated_at": "2026-09-03T09:36:44.622000Z",
+  "engine_version": "0.1.0",
+  "policy_version": "1.0",
+  "model_versions": {
+    "ML-1": "traffic-cnn1d/2026.09.02+7a3c1f",
+    "ML-2": "mode-lgbm/2026.09.02+7a3c1f"
+  },
+
+  "capture_quality": {
+    "packet_count": 17529,
+    "duration_s": 176.214,
+    "truncated": false,
+    "has_ike": true,
+    "ike_complete": true,
+    "esp_sa_count": 2,
+    "sufficient_for_lattice": false,
+    "warnings": [
+      "ESP payload lengths span only 3 distinct values across 17486 packets. The length-lattice cipher-family test needs at least 8 distinct lengths over at least 200 packets and has been disabled for this capture.",
+      "IKEv2 negotiates the Child SA inside the encrypted IKE_AUTH exchange. Only IKE_SA_INIT is cleartext, so the ESP algorithm set is inferred from the IKE SA proposal rather than read directly.",
+      "IKEv2 does not negotiate SA lifetimes (RFC 7296 removed the mechanism), and no CREATE_CHILD_SA occurred in the 176.2 s window. Neither a negotiated lifetime nor an observed rekey interval is available for this SA.",
+      "Perfect Forward Secrecy could not be determined: it is visible from a CREATE_CHILD_SA exchange carrying a KE payload, and none occurred within the capture window."
+    ]
+  },
+
+  "security_associations": [
+    {
+      "spi_initiator": "a15c7e30",
+      "spi_responder": "6d92f4b8",
+      "src": "10.10.0.2",
+      "dst": "10.10.0.3",
+      "ip_version": 4,
+      "protocol": "esp",
+      "first_seen": "2026-09-03T09:31:08.994000Z",
+      "last_seen": "2026-09-03T09:34:03.882000Z",
+      "packet_count": 17486,
+      "byte_count": 4476416,
+
+      "ike_version": {
+        "value": "ikev2",
+        "provenance": "observed",
+        "evidence": {
+          "method": "isakmp_header_version",
+          "packet_indices": [0, 1],
+          "measured": { "header_major_version": 2, "header_minor_version": 0 }
+        }
+      },
+
+      "ike_exchange_mode": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "Exchange mode is an IKEv1 Phase 1 concept. IKEv2 has no main or aggressive mode, so there is nothing to report here rather than something that could not be read."
+      },
+
+      "encryption_alg": {
+        "value": "aes-gcm-16",
+        "provenance": "inferred",
+        "confidence": 0.92,
+        "note": "The Child SA proposal is carried inside the encrypted IKE_AUTH exchange and was not readable. Inferred from the IKE SA proposal in the cleartext IKE_SA_INIT, which selected ENCR_AES_GCM_16. Deployments almost always use the same cipher family for the IKE SA and its children, but this is a strong prior rather than an observation.",
+        "evidence": {
+          "method": "child_sa_inferred_from_ike_sa_proposal",
+          "packet_indices": [0, 1],
+          "measured": {
+            "ike_sa_transform_type_1_id": 20,
+            "ike_sa_transform_name": "ENCR_AES_GCM_16",
+            "ike_auth_encrypted": "true",
+            "child_sa_proposals_readable": 0
+          }
+        }
+      },
+
+      "encryption_keylen": {
+        "value": 256,
+        "provenance": "inferred",
+        "confidence": 0.88,
+        "note": "The IKE SA carried a KEY_LENGTH attribute of 256 bits in the cleartext IKE_SA_INIT. The Child SA key length is inferred from it on the same reasoning as the cipher. Note that this value could not have been recovered from ESP alone: AES-128 and AES-256 are indistinguishable from packet geometry (PRD section 7).",
+        "evidence": {
+          "method": "child_sa_inferred_from_ike_sa_proposal",
+          "packet_indices": [0, 1],
+          "measured": {
+            "ike_sa_attribute_14_key_length": 256,
+            "esp_geometry_can_distinguish_key_length": "false"
+          }
+        }
+      },
+
+      "integrity_alg": {
+        "value": "none",
+        "provenance": "inferred",
+        "confidence": 0.92,
+        "note": "A negotiated absence, not a missing value. AES-GCM is an AEAD cipher that integrity-protects internally, so a separate integrity transform is neither proposed nor wanted; RFC 8221 requires INTEG_NONE with a combined-mode cipher. Inferred alongside the cipher, from the same IKE SA proposal.",
+        "evidence": {
+          "method": "child_sa_inferred_from_ike_sa_proposal",
+          "packet_indices": [0, 1],
+          "measured": {
+            "ike_sa_transform_type_3_present": "false",
+            "aead_cipher": "true",
+            "esp_icv_bytes": 16
+          }
+        }
+      },
+
+      "prf_alg": {
+        "value": "hmac-sha384",
+        "provenance": "observed",
+        "evidence": {
+          "method": "ikev2_sa_init_transforms",
+          "packet_indices": [0, 1],
+          "measured": { "transform_type_2_id": 6, "transform_name": "PRF_HMAC_SHA2_384" }
+        }
+      },
+
+      "dh_group": {
+        "value": 19,
+        "provenance": "observed",
+        "note": "Group 19 is ECP-256, a 256-bit random elliptic curve group, comparable to 128-bit symmetric strength. Acceptable under RFC 8247; Group 20 (ECP-384) would raise the margin further.",
+        "evidence": {
+          "method": "ikev2_sa_init_transforms",
+          "packet_indices": [0, 1],
+          "measured": {
+            "transform_type_4_group": 19,
+            "ke_payload_bytes": 64,
+            "comparable_symmetric_strength_bits": 128
+          }
+        }
+      },
+
+      "operating_mode": {
+        "value": "tunnel",
+        "provenance": "inferred",
+        "confidence": 0.96,
+        "note": "ML-2. The modal ESP payload length sits 20 bytes above the transport-mode expectation for the same inner stream, which is the size of the encapsulated inner IPv4 header, and the outer addresses emit no unrelated cleartext during the capture.",
+        "evidence": {
+          "method": "encapsulation_overhead_classifier",
+          "packet_indices": [388, 389, 390, 391, 392],
+          "measured": {
+            "modal_esp_payload_len": 228,
+            "expected_transport_len": 208,
+            "expected_tunnel_len": 228,
+            "distinct_spi_pairs_per_outer_address": 1,
+            "cleartext_packets_from_same_addresses": 0
+          },
+          "total_matching": 17486
+        }
+      },
+
+      "pfs_enabled": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "PFS status is read from a CREATE_CHILD_SA exchange carrying a KE payload, whose size is fixed by the DH group. No CREATE_CHILD_SA occurred in the 176.2 s capture window, which is expected for a short capture, and the initial Child SA proposal inside IKE_AUTH is encrypted. A longer capture spanning at least one rekey would resolve this."
+      },
+
+      "auth_method": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "The IKEv2 AUTH payload travels inside the encrypted IKE_AUTH exchange and its method field is not visible to a passive observer. Reporting a value here would be a guess."
+      },
+
+      "negotiated_lifetime_s": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "IKEv2 does not negotiate SA lifetimes. RFC 7296 removed the mechanism, and each peer expires SAs on its own local policy, so no negotiated value exists on the wire to report. The assessment falls back to the observed rekey interval, which was also unavailable in this capture."
+      },
+
+      "observed_rekey_s": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "Measured from the interval between the first appearance of successive SPIs on the same endpoint pair. Only one SPI pair appeared in the 176.2 s window, so no interval could be measured."
+      },
+
+      "esn_negotiated": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "ESN is negotiated as transform type 5 in the Child SA proposal, which travels inside the encrypted IKE_AUTH exchange. It cannot be recovered from the wire either: only the low 32 bits of the sequence number are transmitted whether or not ESN is in use."
+      },
+
+      "replay_sane": {
+        "value": true,
+        "provenance": "inferred",
+        "confidence": 0.99,
+        "note": "Sequence numbers behave correctly on the wire. This is not a statement that anti-replay is enabled; the window size is a receiver-side local setting and is never transmitted.",
+        "evidence": {
+          "method": "sequence_number_monotonicity",
+          "packet_indices": [4, 5, 6, 7, 8],
+          "measured": {
+            "packets_examined": 17486,
+            "duplicate_sequence_numbers": 0,
+            "sequence_gaps": 1,
+            "largest_gap": 1,
+            "gaps_attributable_to_capture_drops": 1
+          },
+          "total_matching": 17486
+        }
+      },
+
+      "nat_traversal": {
+        "value": false,
+        "provenance": "observed",
+        "note": "Both peers sent NAT_DETECTION_SOURCE_IP and NAT_DETECTION_DESTINATION_IP notifies in IKE_SA_INIT and the hashes matched the observed addresses, so no NAT is on the path. Traffic stayed on UDP/500 with no UDP encapsulation.",
+        "evidence": {
+          "method": "udp_encapsulation_and_nat_detection",
+          "packet_indices": [0, 1],
+          "measured": {
+            "ike_udp_port": 500,
+            "udp_4500_packets": 0,
+            "nat_detection_source_ip_notifies": 2,
+            "nat_detection_destination_ip_notifies": 2,
+            "nat_detected": "false"
+          }
+        }
+      },
+
+      "inner_traffic": [
+        {
+          "label": "voip",
+          "probability": 0.95,
+          "window_start": "2026-09-03T09:31:08.994000Z",
+          "window_end": "2026-09-03T09:31:58.994000Z",
+          "top_features": [
+            { "feature": "iat_cv", "contribution": 0.298, "observed_value": 0.044 },
+            { "feature": "esp_payload_len_std", "contribution": 0.231, "observed_value": 4.1 },
+            { "feature": "up_down_packet_ratio", "contribution": 0.154, "observed_value": 0.998 },
+            { "feature": "packets_per_second", "contribution": 0.102, "observed_value": 99.1 },
+            { "feature": "modal_length_share", "contribution": 0.071, "observed_value": 0.961 }
+          ]
+        },
+        {
+          "label": "voip",
+          "probability": 0.94,
+          "window_start": "2026-09-03T09:31:58.994000Z",
+          "window_end": "2026-09-03T09:32:48.994000Z",
+          "top_features": []
+        },
+        {
+          "label": "voip",
+          "probability": 0.89,
+          "window_start": "2026-09-03T09:32:48.994000Z",
+          "window_end": "2026-09-03T09:33:18.994000Z",
+          "top_features": [
+            { "feature": "packets_per_second", "contribution": 0.176, "observed_value": 58.9 },
+            { "feature": "idle_period_max_s", "contribution": 0.133, "observed_value": 2.07 },
+            { "feature": "iat_cv", "contribution": 0.118, "observed_value": 0.229 }
+          ]
+        },
+        {
+          "label": "voip",
+          "probability": 0.94,
+          "window_start": "2026-09-03T09:33:18.994000Z",
+          "window_end": "2026-09-03T09:34:03.882000Z",
+          "top_features": []
+        }
+      ]
+    }
+  ],
+
+  "findings": [
+    {
+      "id": "META-HIGH-EXPOSURE",
+      "title": "Inner traffic type is identifiable from metadata alone",
+      "severity": "medium",
+      "category": "metadata_exposure",
+      "penalty": 10,
+      "description": "The traffic classifier identified the encrypted payload as VoIP with a mean confidence of 0.93 across the capture. Every cryptographic parameter on this tunnel is at or above current guidance, and none of that changes what the traffic pattern reveals: the constant 20 ms cadence and near-uniform payload length of a G.711 stream pass through AES-256-GCM unchanged. A passive observer still learns that a voice call is taking place, when it starts and ends, and when each party is speaking. This is the finding that survives good cryptography, and it is why metadata exposure is scored separately from cipher strength.",
+      "remediation": "Traffic-flow confidentiality padding is the direct countermeasure. RFC 4303 permits arbitrary ESP padding; where the gateway supports it, enable TFC padding so payload lengths are randomised. Where it does not, carry real-time media over a tunnel that also carries other traffic so the timing signal is not dominated by a single constant-bitrate flow. Either measure reduces leakage rather than eliminating it, and the residual should be accepted explicitly rather than assumed away.",
+      "standards": [
+        { "ref": "RFC 4303", "clause": "Section 2.7" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 3.3" }
+      ],
+      "attack_techniques": ["T1040"],
+      "sa_spi": "a15c7e30",
+      "evidence": {
+        "method": "classifier_confidence_aggregate",
+        "packet_indices": [388, 389, 390, 391, 392, 393],
+        "measured": {
+          "mean_confidence": 0.93,
+          "chance_level": 0.142857,
+          "windows_scored": 4,
+          "dominant_label": "voip",
+          "iat_coefficient_of_variation": 0.044,
+          "distinct_esp_payload_lengths": 3
+        },
+        "total_matching": 17486
+      }
+    }
+  ],
+
+  "score": {
+    "total": 90,
+    "category_penalties": {
+      "metadata_exposure": 10
+    },
+    "rating": "strong"
+  },
+
+  "metadata_exposure": {
+    "score": 92,
+    "mean_classifier_confidence": 0.93,
+    "identified_classes": ["voip"],
+    "rationale": "The inner traffic was identified as VoIP with a mean confidence of 0.93 across four scored windows, only marginally below the weak tunnel's 0.96. Hardening the cryptography did almost nothing to this number, which is the point: packet timing and size are outside what encryption protects. Scaled from the 1-in-7 chance level this leaves a passive observer with near-certainty about what the tunnel carries."
+  },
+
+  "threat_matrix": [
+    {
+      "technique_id": "T1040",
+      "technique_name": "Network Sniffing",
+      "tactics": ["Credential Access", "Discovery"],
+      "finding_ids": ["META-HIGH-EXPOSURE"],
+      "max_severity": "medium"
+    }
+  ]
+}

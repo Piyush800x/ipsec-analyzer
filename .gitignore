@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# uv
+# uv.lock IS committed — it is the reproducibility guarantee.
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Local data — captures and databases never enter the repository
+data/
+*.db
+*.sqlite
+*.sqlite3
+backend/data/
+captures/
+
+# Datasets and model artefacts are DVC-tracked, not git-tracked
+dataset/**/*.pcap
+dataset/**/*.pcapng
+backend/models/*.pkl
+backend/models/*.joblib
+backend/models/*.onnx
+backend/models/*.pt
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# npm on Windows occasionally materialises its cache under the reserved name NUL
+NUL/

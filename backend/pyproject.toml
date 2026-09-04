@@ -1,0 +1,98 @@
+[project]
+name = "ipsec-analyzer"
+version = "0.1.0"
+description = "AI-powered IPsec VPN protocol analyzer and security assessment framework"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14",
+    "asyncpg>=0.30",
+    "aiosqlite>=0.20",
+    "greenlet>=3.1",
+    "uuid6>=2024.7.10",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.ipsec-analyzer.external-tools]
+# LLD §6.1: Wireshark's JSON field names change across releases and will silently
+# break the Track A parser. The Dockerfile installs exactly this version and
+# tests/test_tshark_version.py asserts the running binary matches.
+tshark = "4.4.18"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/analyzer"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming — enforces snake_case
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # comprehensions
+    "DTZ",  # flake8-datetimez — bans naive datetimes
+    "T20",  # no print()
+    "PT",   # pytest style
+    "RET",  # return simplification
+    "SIM",  # simplify
+    "ARG",  # unused arguments
+    "PTH",  # use pathlib
+    "ERA",  # commented-out code
+    "RUF",
+]
+ignore = [
+    "B008",  # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001"]
+"alembic/versions/*" = ["E501", "N999"]
+
+[tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["analyzer"]
+
+[[tool.mypy.overrides]]
+module = ["uuid6.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+markers = [
+    "postgres: requires a live PostgreSQL server (set TEST_POSTGRES_URL)",
+    "neon: requires a live Neon pooled endpoint (set NEON_POOLED_URL)",
+    "docker: requires a running Docker daemon",
+]

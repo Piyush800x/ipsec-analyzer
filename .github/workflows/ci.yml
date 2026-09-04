@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Never let a developer's real Neon URL leak into a CI run.
+  STORAGE_PATH: /tmp/ipsec-analyzer/captures
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # LLD §12: the DB layer must behave identically on SQLite and Postgres, so
+    # the suite runs against both in one job.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: analyzer
+          POSTGRES_PASSWORD: analyzer
+          POSTGRES_DB: analyzer_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U analyzer"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Ruff (lint)
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy
+
+      # One run covers both backends: the `backend` fixture in tests/conftest.py
+      # parametrises every database test over SQLite and PostgreSQL, and skips
+      # the PostgreSQL half only when TEST_POSTGRES_URL is unset. Setting it here
+      # is what turns LLD 4.1's dual-backend rule into something CI enforces.
+      # One run covers both backends: the `backend` fixture in tests/conftest.py
+      # parametrises every database test over SQLite and PostgreSQL. REQUIRE_POSTGRES
+      # turns a skipped PostgreSQL backend into a failure, so a service that never
+      # came up cannot hide inside a green run.
+      - name: pytest (SQLite and PostgreSQL)
+        env:
+          TEST_POSTGRES_URL: postgresql+asyncpg://analyzer:analyzer@localhost:5432/analyzer_test
+          REQUIRE_POSTGRES: "1"
+        run: uv run pytest
+
+      # CLAUDE.md: every migration must survive upgrade followed by downgrade on
+      # both backends. Downgrades are not optional, and a migration that only
+      # runs forwards is discovered at the worst possible moment.
+      - name: Alembic round trip (SQLite)
+        env:
+          DATABASE_URL_DIRECT: sqlite+aiosqlite:///./ci-migrate.db
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+
+      - name: Alembic round trip (PostgreSQL)
+        env:
+          DATABASE_URL_DIRECT: postgresql+asyncpg://analyzer:analyzer@localhost:5432/analyzer_test
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+
+  frontend:
+    name: Frontend (types, lint, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: tsc --noEmit
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

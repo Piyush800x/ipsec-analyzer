@@ -1,0 +1,516 @@
+{
+  "schema_version": "1.0",
+  "assessment_id": "01a06691-947f-79c1-ab3c-4d5e6f708192",
+  "capture_id": "01a0668c-3f91-73f8-9a2b-3c4d5e6f7081",
+  "generated_at": "2026-09-03T09:20:11.903000Z",
+  "engine_version": "0.1.0",
+  "policy_version": "1.0",
+  "model_versions": {
+    "ML-1": "traffic-cnn1d/2026.09.02+7a3c1f",
+    "ML-2": "mode-lgbm/2026.09.02+7a3c1f"
+  },
+
+  "capture_quality": {
+    "packet_count": 17543,
+    "duration_s": 176.803,
+    "truncated": false,
+    "has_ike": true,
+    "ike_complete": true,
+    "esp_sa_count": 2,
+    "sufficient_for_lattice": false,
+    "warnings": [
+      "ESP payload lengths span only 3 distinct values across 17500 packets. The length-lattice cipher-family test needs at least 8 distinct lengths over at least 200 packets and has been disabled for this capture; the cipher was read from the IKE negotiation instead.",
+      "No SPI rotation occurred within the 176.8 s window, so the observed rekey interval could not be measured against the negotiated 86400 s lifetime.",
+      "IKEv1 Quick Mode is encrypted under the Phase 1 SA, so the ESP transform set was not read directly. The reported algorithms are the Phase 1 (ISAKMP SA) transforms."
+    ]
+  },
+
+  "security_associations": [
+    {
+      "spi_initiator": "3f8e21a5",
+      "spi_responder": "9b04dd7c",
+      "src": "10.10.0.2",
+      "dst": "10.10.0.3",
+      "ip_version": 4,
+      "protocol": "esp",
+      "first_seen": "2026-09-03T09:14:23.104000Z",
+      "last_seen": "2026-09-03T09:17:18.947000Z",
+      "packet_count": 17500,
+      "byte_count": 4061672,
+
+      "ike_version": {
+        "value": "ikev1",
+        "provenance": "observed",
+        "evidence": {
+          "method": "isakmp_header_version",
+          "packet_indices": [0, 1, 2],
+          "measured": { "header_major_version": 1, "header_minor_version": 0 }
+        }
+      },
+
+      "ike_exchange_mode": {
+        "value": "aggressive",
+        "provenance": "observed",
+        "note": "Exchange type 4. The initiator's identity and the PSK authentication hash are both sent in the clear in message 1, before any encryption is established.",
+        "evidence": {
+          "method": "isakmp_header_exchange_type",
+          "packet_indices": [0],
+          "measured": { "exchange_type": 4, "phase_1_message_count": 3 }
+        }
+      },
+
+      "encryption_alg": {
+        "value": "3des-cbc",
+        "provenance": "observed",
+        "note": "Read from the cleartext Phase 1 SA payload. IKEv1 Quick Mode is encrypted under the Phase 1 SA, so the ESP transform set was not independently confirmed; strongSwan applies the configured esp proposal, which for this deployment matches.",
+        "evidence": {
+          "method": "ikev1_phase1_sa_transform_attributes",
+          "packet_indices": [0, 1],
+          "measured": {
+            "attribute_1_encryption_algorithm": 5,
+            "encryption_algorithm_name": "3DES-CBC",
+            "block_size_bits": 64,
+            "proposals_offered": 1
+          }
+        }
+      },
+
+      "encryption_keylen": {
+        "value": 168,
+        "provenance": "observed",
+        "note": "3DES has a fixed 168-bit key, so no KEY_LENGTH attribute is negotiated. Effective strength is 112 bits against a meet-in-the-middle attack.",
+        "evidence": {
+          "method": "algorithm_fixed_key_length",
+          "packet_indices": [0],
+          "measured": {
+            "key_length_attribute_present": "false",
+            "nominal_key_bits": 168,
+            "effective_strength_bits": 112
+          }
+        }
+      },
+
+      "integrity_alg": {
+        "value": "hmac-sha1-96",
+        "provenance": "observed",
+        "evidence": {
+          "method": "ikev1_phase1_sa_transform_attributes",
+          "packet_indices": [0, 1],
+          "measured": { "attribute_2_hash_algorithm": 2, "hash_algorithm_name": "SHA" }
+        }
+      },
+
+      "prf_alg": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "IKEv1 does not negotiate a PRF as a separate transform. The pseudo-random function is derived from the negotiated hash algorithm (RFC 2409 section 5), so there is no distinct value to report."
+      },
+
+      "dh_group": {
+        "value": 2,
+        "provenance": "observed",
+        "note": "Group 2 is MODP-1024. Precomputation against the small number of standardised 1024-bit primes is within reach of a well-resourced adversary (Logjam), and RFC 8247 lists it as MUST NOT.",
+        "evidence": {
+          "method": "ikev1_phase1_sa_transform_attributes",
+          "packet_indices": [0, 1],
+          "measured": {
+            "attribute_4_group_description": 2,
+            "modp_prime_bits": 1024,
+            "ke_payload_bytes": 128
+          }
+        }
+      },
+
+      "operating_mode": {
+        "value": "transport",
+        "provenance": "inferred",
+        "confidence": 0.91,
+        "note": "ML-2. The modal ESP payload length matches the transport-mode expectation for a G.711 RTP stream to within a byte, and the outer addresses carry unrelated cleartext ARP and NTP traffic in the same capture, which is characteristic of hosts rather than gateways.",
+        "evidence": {
+          "method": "encapsulation_overhead_classifier",
+          "packet_indices": [412, 413, 414, 415, 416],
+          "measured": {
+            "modal_esp_payload_len": 204,
+            "expected_transport_len": 204,
+            "expected_tunnel_len": 224,
+            "distinct_spi_pairs_per_outer_address": 1,
+            "cleartext_packets_from_same_addresses": 43
+          },
+          "total_matching": 17500
+        }
+      },
+
+      "pfs_enabled": {
+        "value": false,
+        "provenance": "observed",
+        "note": "No KE payload appeared in the Quick Mode exchange, so the Child SA keys were derived from the Phase 1 shared secret. Compromise of that secret exposes all traffic protected by every Child SA derived from it.",
+        "evidence": {
+          "method": "ikev1_quick_mode_ke_payload_absent",
+          "packet_indices": [3, 4, 5],
+          "measured": { "quick_mode_exchanges": 1, "quick_mode_ke_payloads": 0 }
+        }
+      },
+
+      "auth_method": {
+        "value": "psk",
+        "provenance": "observed",
+        "note": "Pre-shared key. Combined with aggressive mode this exposes the authentication hash to a passive observer for offline cracking.",
+        "evidence": {
+          "method": "ikev1_phase1_sa_transform_attributes",
+          "packet_indices": [0],
+          "measured": { "attribute_3_authentication_method": 1 }
+        }
+      },
+
+      "negotiated_lifetime_s": {
+        "value": 86400,
+        "provenance": "observed",
+        "evidence": {
+          "method": "ikev1_sa_lifetime_attributes",
+          "packet_indices": [0, 1],
+          "measured": {
+            "attribute_11_life_type": 1,
+            "attribute_12_life_duration_s": 86400,
+            "life_duration_hours": 24
+          }
+        }
+      },
+
+      "observed_rekey_s": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "The rekey interval is measured from the time between the first appearance of successive SPIs on the same endpoint pair. Only one SPI pair appeared in the 176.8 s capture window, which is expected given the negotiated 86400 s lifetime."
+      },
+
+      "esn_negotiated": {
+        "value": null,
+        "provenance": "unavailable",
+        "note": "Extended Sequence Numbers are negotiated as IKEv2 transform type 5. IKEv1 has no equivalent in this exchange, and ESN cannot be determined from the wire either, because only the low 32 bits of the sequence number are transmitted whether or not ESN is in use."
+      },
+
+      "replay_sane": {
+        "value": true,
+        "provenance": "inferred",
+        "confidence": 0.99,
+        "note": "Sequence numbers behave correctly on the wire. This is not a statement that anti-replay is enabled: the anti-replay window size is a receiver-side local setting and is never transmitted, so it cannot be reported at all.",
+        "evidence": {
+          "method": "sequence_number_monotonicity",
+          "packet_indices": [6, 7, 8, 9, 10],
+          "measured": {
+            "packets_examined": 17500,
+            "duplicate_sequence_numbers": 0,
+            "sequence_gaps": 3,
+            "largest_gap": 1,
+            "gaps_attributable_to_capture_drops": 3
+          },
+          "total_matching": 17500
+        }
+      },
+
+      "nat_traversal": {
+        "value": false,
+        "provenance": "observed",
+        "evidence": {
+          "method": "udp_encapsulation_and_nat_detection",
+          "packet_indices": [0, 1],
+          "measured": {
+            "ike_udp_port": 500,
+            "udp_4500_packets": 0,
+            "nat_d_payloads": 0
+          }
+        }
+      },
+
+      "inner_traffic": [
+        {
+          "label": "voip",
+          "probability": 0.97,
+          "window_start": "2026-09-03T09:14:23.104000Z",
+          "window_end": "2026-09-03T09:15:03.104000Z",
+          "top_features": [
+            { "feature": "iat_cv", "contribution": 0.312, "observed_value": 0.041 },
+            { "feature": "esp_payload_len_std", "contribution": 0.244, "observed_value": 3.7 },
+            { "feature": "up_down_packet_ratio", "contribution": 0.161, "observed_value": 1.002 },
+            { "feature": "packets_per_second", "contribution": 0.108, "observed_value": 99.4 },
+            { "feature": "modal_length_share", "contribution": 0.079, "observed_value": 0.968 }
+          ]
+        },
+        {
+          "label": "voip",
+          "probability": 0.98,
+          "window_start": "2026-09-03T09:15:03.104000Z",
+          "window_end": "2026-09-03T09:16:13.104000Z",
+          "top_features": []
+        },
+        {
+          "label": "voip",
+          "probability": 0.92,
+          "window_start": "2026-09-03T09:16:13.104000Z",
+          "window_end": "2026-09-03T09:16:33.104000Z",
+          "top_features": [
+            { "feature": "packets_per_second", "contribution": 0.188, "observed_value": 61.2 },
+            { "feature": "idle_period_max_s", "contribution": 0.142, "observed_value": 1.84 },
+            { "feature": "iat_cv", "contribution": 0.121, "observed_value": 0.216 }
+          ]
+        },
+        {
+          "label": "voip",
+          "probability": 0.97,
+          "window_start": "2026-09-03T09:16:33.104000Z",
+          "window_end": "2026-09-03T09:17:18.947000Z",
+          "top_features": []
+        }
+      ]
+    }
+  ],
+
+  "findings": [
+    {
+      "id": "CRYPTO-3DES",
+      "title": "Deprecated 64-bit block cipher in use",
+      "severity": "critical",
+      "category": "cryptographic_strength",
+      "penalty": 30,
+      "description": "The SA negotiated 3DES-CBC. Its 64-bit block size means a birthday-bound collision becomes likely after roughly 2^32 blocks on a single key, which is about 32 GB of traffic (the Sweet32 attack, CVE-2016-2183). This tunnel carries a long-lived VoIP session, exactly the traffic profile Sweet32 targets. RFC 8221 classifies ENCR_3DES as MUST NOT for ESP. Effective key strength is 112 bits, not the nominal 168.",
+      "remediation": "Replace the proposal with AES-256-GCM. In strongSwan swanctl.conf set `esp = aes256gcm16-ecp384` on the child SA and `proposals = aes256gcm16-prfsha384-ecp384` on the IKE SA, then apply with `swanctl --load-all`. If the peer cannot do GCM, `aes256-sha256-ecp384` is an acceptable fallback.",
+      "standards": [
+        { "ref": "RFC 8221", "clause": "Section 5" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 3.1" }
+      ],
+      "attack_techniques": ["T1040", "T1600"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "ikev1_phase1_sa_transform_attributes",
+        "packet_indices": [0, 1],
+        "measured": {
+          "encryption_algorithm": "3des-cbc",
+          "block_size_bits": 64,
+          "sweet32_safe_data_gb": 32,
+          "effective_strength_bits": 112,
+          "sa_bytes_observed": 4061672
+        }
+      }
+    },
+    {
+      "id": "PROTO-AGGRESSIVE-MODE",
+      "title": "IKEv1 aggressive mode exposes the PSK authentication hash",
+      "severity": "critical",
+      "category": "protocol_version_mode",
+      "penalty": 10,
+      "description": "Phase 1 used aggressive mode (exchange type 4) with pre-shared key authentication. Aggressive mode completes in three messages and sends the responder's authentication hash before encryption is established, so a passive observer captures material that can be cracked offline at whatever rate the attacker's hardware allows. The initiator's identity is also sent in the clear. This is the single most damaging finding in this capture, because it undermines the authentication the whole tunnel rests on.",
+      "remediation": "Disable aggressive mode: set `aggressive = no` in the strongSwan connection, which forces main mode and encrypts the identities and hashes. Better, move the connection to IKEv2 with `version = 2`, which has no aggressive mode at all. If PSK authentication must stay, rotate the key after this change, since the current one should be treated as exposed.",
+      "standards": [
+        { "ref": "RFC 8247", "clause": "Section 2" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 5.1" }
+      ],
+      "attack_techniques": ["T1557", "T1110"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "isakmp_header_exchange_type",
+        "packet_indices": [0, 1, 2],
+        "measured": {
+          "exchange_type": 4,
+          "authentication_method": 1,
+          "cleartext_hash_payloads": 1,
+          "cleartext_identity_payloads": 2
+        }
+      }
+    },
+    {
+      "id": "KEX-WEAK-DH",
+      "title": "Diffie-Hellman Group 2 is below the current minimum",
+      "severity": "high",
+      "category": "key_exchange",
+      "penalty": 15,
+      "description": "The key exchange used Group 2 (MODP-1024). Only a handful of 1024-bit primes are in widespread use, and the expensive part of breaking them can be precomputed once per prime and then reused against every connection that shares it (Logjam). A state-level adversary is generally assumed to be capable of this. RFC 8247 lists Group 2 as MUST NOT, and NIST SP 800-57 places 1024-bit finite-field DH below the acceptable floor.",
+      "remediation": "Use an elliptic-curve group. In strongSwan set `proposals = aes256gcm16-prfsha384-ecp384` on the IKE SA, which selects Group 20 (ECP-384). Where the peer requires finite-field DH, `modp2048` (Group 14) is the minimum acceptable substitute.",
+      "standards": [
+        { "ref": "RFC 8247", "clause": "Section 2.4" },
+        { "ref": "NIST SP 800-57 Part 1", "clause": "Section 5.6.1" }
+      ],
+      "attack_techniques": ["T1600"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "ikev1_phase1_sa_transform_attributes",
+        "packet_indices": [0, 1],
+        "measured": {
+          "group_description": 2,
+          "modp_prime_bits": 1024,
+          "comparable_symmetric_strength_bits": 80
+        }
+      }
+    },
+    {
+      "id": "KEX-PFS-DISABLED",
+      "title": "Perfect Forward Secrecy is not in use",
+      "severity": "high",
+      "category": "key_exchange",
+      "penalty": 12,
+      "description": "The Quick Mode exchange carried no KE payload, so the Child SA keys were derived from the Phase 1 shared secret rather than from a fresh Diffie-Hellman exchange. Anyone who later recovers that secret can decrypt every session protected by it, including traffic captured months earlier. Combined with the Group 2 exchange above, the long-term secret is itself within reach of a well-resourced adversary.",
+      "remediation": "Enable PFS by including a DH group in the child SA proposal. In strongSwan set `esp = aes256gcm16-ecp384` on the child; the trailing group name is what turns PFS on. Verify afterwards with `swanctl --list-sas`, which reports the child's DH group once it is negotiated.",
+      "standards": [
+        { "ref": "RFC 8247", "clause": "Section 2.4" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 3.3" }
+      ],
+      "attack_techniques": ["T1040"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "ikev1_quick_mode_ke_payload_absent",
+        "packet_indices": [3, 4, 5],
+        "measured": { "quick_mode_exchanges": 1, "quick_mode_ke_payloads": 0 }
+      }
+    },
+    {
+      "id": "PROTO-IKEV1",
+      "title": "IKEv1 in use",
+      "severity": "high",
+      "category": "protocol_version_mode",
+      "penalty": 7,
+      "description": "The deployment negotiates with IKEv1 (RFC 2409). IKEv1 has been superseded by IKEv2 since 2005 and was formally deprecated by RFC 9395. It lacks built-in DoS resistance, has no reliable liveness detection, and its aggressive mode has no safe configuration with pre-shared keys. Modern algorithm guidance in RFC 8247 is written for IKEv2 and is not fully expressible in IKEv1 proposals.",
+      "remediation": "Migrate the connection to IKEv2: set `version = 2` in the strongSwan connection block and rebuild the proposal as `proposals = aes256gcm16-prfsha384-ecp384`. Both strongSwan and Libreswan support IKEv2 on all current releases, so this is normally a configuration change rather than an upgrade.",
+      "standards": [
+        { "ref": "RFC 8247", "clause": "Section 1" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 5.1" }
+      ],
+      "attack_techniques": ["T1557"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "isakmp_header_version",
+        "packet_indices": [0, 1, 2],
+        "measured": { "header_major_version": 1, "header_minor_version": 0 }
+      }
+    },
+    {
+      "id": "KEYMGMT-LONG-LIFETIME",
+      "title": "SA lifetime of 24 hours is excessive",
+      "severity": "high",
+      "category": "key_management",
+      "penalty": 10,
+      "description": "The negotiated SA lifetime is 86400 seconds. A single key protecting a full day of traffic widens every window an attacker has: more ciphertext under one key, a longer period during which a compromised key stays useful, and, with a 64-bit block cipher, enough data to approach the Sweet32 birthday bound. With PFS disabled the effect compounds, because the same Phase 1 secret is reused for the whole period.",
+      "remediation": "Reduce the lifetime to one hour and let rekeying handle the rest. In strongSwan set `rekey_time = 1h` on the child SA and `over_time = 10m`, and set `rekey_time = 4h` on the IKE SA. Both peers should be configured; strongSwan rekeys on the shorter of the two.",
+      "standards": [
+        { "ref": "NIST SP 800-57 Part 1", "clause": "Section 5.3.6" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 3.4" }
+      ],
+      "attack_techniques": ["T1040"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "ikev1_sa_lifetime_attributes",
+        "packet_indices": [0, 1],
+        "measured": {
+          "life_duration_s": 86400,
+          "recommended_max_s": 3600,
+          "ratio_over_recommended": 24.0
+        }
+      }
+    },
+    {
+      "id": "CRYPTO-SHA1",
+      "title": "SHA-1 based integrity algorithm",
+      "severity": "medium",
+      "category": "cryptographic_strength",
+      "penalty": 8,
+      "description": "Integrity is protected by HMAC-SHA1-96. HMAC-SHA1 is not broken by the SHA-1 collision attacks, since HMAC does not depend on collision resistance, so this is a best-practice gap rather than an exploitable weakness. It is still below current guidance: RFC 8221 downgraded AUTH_HMAC_SHA1_96 to MUST- and SHA-1 is being removed from deployment across the industry, so this will become a compliance failure before it becomes a security one.",
+      "remediation": "Move to HMAC-SHA2-256-128 by setting `esp = aes256-sha256-ecp384` in strongSwan. Better still, adopt AES-GCM as recommended above, which provides integrity within the cipher and removes the separate integrity transform entirely.",
+      "standards": [
+        { "ref": "RFC 8221", "clause": "Section 6" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 3.2" }
+      ],
+      "attack_techniques": ["T1040"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "ikev1_phase1_sa_transform_attributes",
+        "packet_indices": [0, 1],
+        "measured": {
+          "hash_algorithm": "sha1",
+          "icv_bits": 96,
+          "rfc8221_requirement_level": "MUST-"
+        }
+      }
+    },
+    {
+      "id": "META-HIGH-EXPOSURE",
+      "title": "Inner traffic type is identifiable from metadata alone",
+      "severity": "medium",
+      "category": "metadata_exposure",
+      "penalty": 10,
+      "description": "The traffic classifier identified the encrypted payload as VoIP with a mean confidence of 0.96 across the capture. That confidence is the measurement: it is what a passive observer with the same view of the wire learns about this tunnel without breaking any encryption. The constant 20 ms packet cadence and near-uniform payload length of a G.711 stream are visible through ESP, and they identify not only that a call is in progress but when it starts, when it ends, and when each party is speaking.",
+      "remediation": "Traffic-flow confidentiality padding is the direct countermeasure. RFC 4303 permits arbitrary ESP padding; where the gateway supports it, enable TFC padding so payload lengths are randomised. Where it does not, reduce the signal by routing real-time media over a tunnel that also carries other traffic, so packet timing is not dominated by a single constant-bitrate flow. Note that this reduces leakage rather than eliminating it.",
+      "standards": [
+        { "ref": "RFC 4303", "clause": "Section 2.7" },
+        { "ref": "NIST SP 800-77 Rev. 1", "clause": "Section 3.3" }
+      ],
+      "attack_techniques": ["T1040"],
+      "sa_spi": "3f8e21a5",
+      "evidence": {
+        "method": "classifier_confidence_aggregate",
+        "packet_indices": [412, 413, 414, 415, 416, 417],
+        "measured": {
+          "mean_confidence": 0.96,
+          "chance_level": 0.142857,
+          "windows_scored": 4,
+          "dominant_label": "voip",
+          "iat_coefficient_of_variation": 0.041,
+          "distinct_esp_payload_lengths": 3
+        },
+        "total_matching": 17500
+      }
+    }
+  ],
+
+  "score": {
+    "total": 15,
+    "category_penalties": {
+      "cryptographic_strength": 30,
+      "key_exchange": 20,
+      "protocol_version_mode": 15,
+      "key_management": 10,
+      "metadata_exposure": 10
+    },
+    "rating": "critical"
+  },
+
+  "metadata_exposure": {
+    "score": 95,
+    "mean_classifier_confidence": 0.96,
+    "identified_classes": ["voip"],
+    "rationale": "The inner traffic was identified as VoIP with a mean confidence of 0.96 across four scored windows. Scaled from the 1-in-7 chance level, that leaves almost no uncertainty for a passive observer to work with: the tunnel reveals that a voice call is taking place, its duration, and its talk pattern, without any of the encryption being broken. A well-padded tunnel would leave the classifier near chance and score close to zero here."
+  },
+
+  "threat_matrix": [
+    {
+      "technique_id": "T1040",
+      "technique_name": "Network Sniffing",
+      "tactics": ["Credential Access", "Discovery"],
+      "finding_ids": [
+        "CRYPTO-3DES",
+        "KEX-PFS-DISABLED",
+        "KEYMGMT-LONG-LIFETIME",
+        "CRYPTO-SHA1",
+        "META-HIGH-EXPOSURE"
+      ],
+      "max_severity": "critical"
+    },
+    {
+      "technique_id": "T1110",
+      "technique_name": "Brute Force",
+      "tactics": ["Credential Access"],
+      "finding_ids": ["PROTO-AGGRESSIVE-MODE"],
+      "max_severity": "critical"
+    },
+    {
+      "technique_id": "T1557",
+      "technique_name": "Adversary-in-the-Middle",
+      "tactics": ["Collection", "Credential Access"],
+      "finding_ids": ["PROTO-AGGRESSIVE-MODE", "PROTO-IKEV1"],
+      "max_severity": "critical"
+    },
+    {
+      "technique_id": "T1600",
+      "technique_name": "Weaken Encryption",
+      "tactics": ["Defense Evasion"],
+      "finding_ids": ["CRYPTO-3DES", "KEX-WEAK-DH"],
+      "max_severity": "critical"
+    }
+  ]
+}

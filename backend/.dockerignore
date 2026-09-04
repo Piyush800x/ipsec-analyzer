@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+data/
+models/*.pkl
+models/*.joblib
+models/*.onnx
+models/*.pt
+*.db
+*.sqlite*
+.env
