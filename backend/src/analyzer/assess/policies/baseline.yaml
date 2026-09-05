@@ -1,0 +1,333 @@
+# Baseline assessment policy. Implementation-plan step 5.3, LLD section 8.1.
+#
+# Every rule carries the remediation as a concrete strongSwan parameter, not as
+# advice: FR-5.7 is explicit that "use stronger crypto" is not remediation.
+#
+# Penalties are the raw weights. The scorer (LLD section 8.3) applies the
+# PRD section 10.1 per-category caps at scoring time, so the penalties within
+# one category may exceed its cap -- the cap is consumed by the most severe
+# finding first. The loader rejects any single rule whose penalty exceeds its
+# own category cap.
+#
+# Any rule keyed on an attribute that can arrive INFERRED carries a
+# confidence_gte guard, enforced at load time by policy.Rule. An OBSERVED
+# attribute passes any threshold; an UNAVAILABLE one never fires a rule at all.
+
+version: "1.0"
+profile: baseline
+
+rules:
+  # --- cryptographic strength (cap 30) -------------------------------------
+
+  - id: CRYPTO-3DES
+    category: cryptographic_strength
+    severity: critical
+    penalty: 30
+    when:
+      all:
+        - {attribute: encryption_alg, operator: in, values: ["3des-cbc"]}
+        - {attribute: encryption_alg, operator: confidence_gte, value: 0.7}
+    title: Deprecated 64-bit block cipher in use
+    description: >
+      The SA uses 3DES-CBC, a 64-bit block cipher. Birthday-bound collisions
+      become practical after roughly 32 GB on a single key (Sweet32,
+      CVE-2016-2183), and its 168 key bits give about 112 bits of effective
+      strength against a meet-in-the-middle attack. RFC 8221 marks it MUST NOT.
+    remediation: >
+      Set esp = aes256gcm16-ecp384 and ike = aes256-sha384-ecp384 in the
+      strongSwan connection, then remove 3des from any proposal list so it
+      cannot be renegotiated.
+    standards:
+      - {ref: "RFC 8221", clause: "Section 5"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 3.1"}
+    attack: ["T1040", "T1600"]
+
+  - id: CRYPTO-DES
+    category: cryptographic_strength
+    severity: critical
+    penalty: 30
+    when:
+      all:
+        - {attribute: encryption_alg, operator: in, values: ["des-cbc"]}
+        - {attribute: encryption_alg, operator: confidence_gte, value: 0.7}
+    title: Single DES in use
+    description: >
+      The SA uses DES-CBC, whose 56-bit key has been exhaustively searchable
+      since 1998 and is now breakable in hours on commodity hardware. Traffic
+      protected by it should be treated as cleartext.
+    remediation: >
+      Set esp = aes256gcm16-ecp384 immediately and rotate any credentials that
+      have crossed this tunnel, since past captured traffic is decryptable.
+    standards:
+      - {ref: "RFC 8221", clause: "Section 5"}
+      - {ref: "NIST SP 800-131A Rev. 2", clause: "Section 3"}
+    attack: ["T1040", "T1600"]
+
+  - id: CRYPTO-NULL-ENC
+    category: cryptographic_strength
+    severity: critical
+    penalty: 30
+    when:
+      all:
+        - {attribute: encryption_alg, operator: in, values: ["null"]}
+        - {attribute: encryption_alg, operator: confidence_gte, value: 0.7}
+    title: ESP with no confidentiality
+    description: >
+      The SA negotiated ENCR_NULL. The tunnel authenticates its traffic but
+      encrypts none of it, so every payload is readable by anyone on the path.
+      This is a valid configuration for integrity-only deployments and a
+      catastrophic one everywhere else.
+    remediation: >
+      If confidentiality is intended, set esp = aes256gcm16-ecp384. If this
+      deployment genuinely wants integrity only, record that decision
+      explicitly so this finding can be accepted rather than rediscovered.
+    standards:
+      - {ref: "RFC 8221", clause: "Section 5"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 3.1"}
+    attack: ["T1040"]
+
+  - id: CRYPTO-WEAK-INTEG-MD5
+    category: cryptographic_strength
+    severity: high
+    penalty: 12
+    when:
+      all:
+        - {attribute: integrity_alg, operator: in, values: ["hmac-md5-96"]}
+        - {attribute: integrity_alg, operator: confidence_gte, value: 0.7}
+    title: MD5-based integrity algorithm
+    description: >
+      The SA uses HMAC-MD5-96. MD5's collision resistance is broken and RFC
+      8221 marks HMAC-MD5 MUST NOT for ESP. HMAC constructions resist the known
+      collision attacks better than bare MD5, but there is no reason to keep it.
+    remediation: >
+      Set esp = aes256gcm16-ecp384, which authenticates internally, or
+      aes256-sha256 if a separate integrity algorithm is required.
+    standards:
+      - {ref: "RFC 8221", clause: "Section 6"}
+      - {ref: "NIST SP 800-131A Rev. 2", clause: "Section 9"}
+    attack: ["T1040", "T1557"]
+
+  - id: CRYPTO-SHA1
+    category: cryptographic_strength
+    severity: medium
+    penalty: 8
+    when:
+      all:
+        - {attribute: integrity_alg, operator: in, values: ["hmac-sha1-96"]}
+        - {attribute: integrity_alg, operator: confidence_gte, value: 0.7}
+    title: SHA-1 based integrity algorithm
+    description: >
+      The SA uses HMAC-SHA1-96. SHA-1 is collision-broken (SHAttered, 2017) and
+      RFC 8221 downgrades HMAC-SHA1-96 to MUST-. HMAC-SHA1 is not itself
+      practically forgeable today, which is why this is a medium rather than a
+      critical finding, but it is on every deprecation path.
+    remediation: >
+      Set esp = aes256gcm16-ecp384, or aes256-sha256 where a separate integrity
+      transform is required by policy.
+    standards:
+      - {ref: "RFC 8221", clause: "Section 6"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 3.2"}
+    attack: ["T1040"]
+
+  - id: CRYPTO-DOWNGRADE-OFFER
+    category: cryptographic_strength
+    severity: high
+    penalty: 15
+    when:
+      all:
+        - {attribute: downgrade_available, operator: eq, value: true}
+        - {attribute: downgrade_available, operator: confidence_gte, value: 0.7}
+    title: A weaker cipher was offered alongside the one selected
+    description: >
+      The initiator's proposal list included an algorithm weaker than the one
+      finally negotiated. The selected suite is only as strong as the weakest
+      suite an attacker can force the peers into: an adversary able to modify
+      the negotiation can steer it to the weaker option, and the peers will
+      accept it because they offered it.
+    remediation: >
+      Reduce the strongSwan ike and esp proposal lists to the single suite you
+      intend to use. Every additional entry is an option an attacker can select
+      on your behalf.
+    standards:
+      - {ref: "RFC 8247", clause: "Section 2"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 5.1"}
+    attack: ["T1600"]
+
+  # --- key exchange (cap 20) -----------------------------------------------
+
+  - id: KEX-WEAK-DH
+    category: key_exchange
+    severity: high
+    penalty: 15
+    when: {attribute: dh_group, operator: in, values: [1, 2, 5]}
+    title: Diffie-Hellman group below the current minimum
+    description: >
+      The key exchange used a MODP group of 1536 bits or fewer. Group 1 (768)
+      and Group 2 (1024) are within reach of a well-resourced adversary who
+      precomputes against the shared prime, which recovers every session that
+      ever used it. Group 2 offers roughly 80 bits of comparable symmetric
+      strength against that attack.
+    remediation: >
+      Set ike = aes256-sha384-ecp384 (Group 20) or at minimum modp2048
+      (Group 14), and set esp accordingly so the Child SA rekey uses the same
+      group.
+    standards:
+      - {ref: "RFC 8247", clause: "Section 2.4"}
+      - {ref: "NIST SP 800-57 Part 1", clause: "Section 5.6.1"}
+    attack: ["T1600"]
+
+  - id: KEX-PFS-DISABLED
+    category: key_exchange
+    severity: high
+    penalty: 12
+    when:
+      all:
+        - {attribute: pfs_enabled, operator: eq, value: false}
+        - {attribute: pfs_enabled, operator: confidence_gte, value: 0.7}
+    title: Perfect Forward Secrecy is not in use
+    description: >
+      Child SAs are rekeyed without a fresh Diffie-Hellman exchange, so every
+      Child SA derives from the same IKE SA key material. An adversary who
+      recovers that key material -- by compromising an endpoint, or later by
+      cryptanalysis -- can decrypt every session recorded under it, including
+      traffic captured before the compromise.
+    remediation: >
+      Add a DH group to the child proposal so a fresh exchange happens at
+      rekey, e.g. esp = aes256gcm16-ecp384 rather than esp = aes256gcm16.
+    standards:
+      - {ref: "RFC 8247", clause: "Section 2.4"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 3.3"}
+    attack: ["T1040"]
+
+  # --- protocol version and mode (cap 15) ----------------------------------
+
+  - id: PROTO-AGGRESSIVE-MODE
+    category: protocol_version_mode
+    severity: critical
+    penalty: 10
+    when: {attribute: ike_exchange_mode, operator: eq, value: aggressive}
+    title: IKEv1 aggressive mode exposes the PSK authentication hash
+    description: >
+      Phase 1 ran in aggressive mode, which completes in three messages and
+      sends the authentication hash before the identities are protected. A
+      passive observer captures that hash and can crack the pre-shared key
+      offline at their leisure, with no further interaction with either peer.
+    remediation: >
+      Migrate the connection to IKEv2 (version = 2 in strongSwan). If IKEv1
+      must be kept, set aggressive = no so Phase 1 uses main mode, and rotate
+      the PSK -- assume the current one is already captured.
+    standards:
+      - {ref: "RFC 8247", clause: "Section 2"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 5.1"}
+    attack: ["T1557", "T1110"]
+
+  - id: PROTO-IKEV1
+    category: protocol_version_mode
+    severity: high
+    penalty: 7
+    when: {attribute: ike_version, operator: eq, value: ikev1}
+    title: IKEv1 in use
+    description: >
+      The SA was negotiated with IKEv1, which RFC 8247 deprecates in favour of
+      IKEv2. IKEv1 has no built-in DoS protection, a more complex and
+      error-prone state machine, and no equivalent of IKEv2's cryptographically
+      bound negotiation, which makes downgrade attacks easier to mount.
+    remediation: >
+      Set version = 2 on the strongSwan connection and confirm the peer
+      supports IKEv2 before cutting over.
+    standards:
+      - {ref: "RFC 8247", clause: "Section 1"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 5.1"}
+    attack: ["T1557"]
+
+  # --- key management (cap 15) ---------------------------------------------
+
+  - id: KEYMGMT-LONG-LIFETIME
+    category: key_management
+    severity: high
+    penalty: 10
+    when: {attribute: negotiated_lifetime_s, operator: gt, value: 28800}
+    title: SA lifetime exceeds eight hours
+    description: >
+      The negotiated SA lifetime is longer than eight hours. A long-lived key
+      widens the window in which a single compromise is useful, and for 64-bit
+      block ciphers it also increases the volume of data under one key towards
+      the birthday bound.
+    remediation: >
+      Set ike_lifetime = 4h and lifetime = 1h on the child SA in strongSwan.
+      Shorter lifetimes cost a rekey exchange and nothing else.
+    standards:
+      - {ref: "NIST SP 800-57 Part 1", clause: "Section 5.3.6"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 3.4"}
+    attack: ["T1040"]
+
+  - id: KEYMGMT-NO-REKEY-OBSERVED
+    category: key_management
+    severity: medium
+    penalty: 6
+    when:
+      all:
+        - {attribute: rekey_observed, operator: eq, value: false}
+        - {attribute: sa_duration_s, operator: gt, value: 7200}
+    title: No rekey observed over a long-lived SA
+    description: >
+      The SA was watched for more than two hours and no SPI rotation was seen,
+      so no rekey happened in that window. Either the lifetime is longer than
+      the observation, or rekeying is not occurring at all.
+    remediation: >
+      Confirm ike_lifetime and the child lifetime are set and that rekeying
+      succeeds -- a failing rekey often manifests as an SA that simply never
+      rotates until it drops.
+    standards:
+      - {ref: "NIST SP 800-57 Part 1", clause: "Section 5.3.6"}
+    attack: ["T1040"]
+
+  # --- replay and integrity (cap 10) ---------------------------------------
+
+  - id: REPLAY-SEQ-ANOMALY
+    category: replay_integrity
+    severity: high
+    penalty: 10
+    when:
+      all:
+        - {attribute: replay_sane, operator: eq, value: false}
+        - {attribute: replay_sane, operator: confidence_gte, value: 0.8}
+    title: ESP sequence numbers do not behave correctly
+    description: >
+      Duplicate or non-monotonic ESP sequence numbers were observed on this SA.
+      This means sequence numbers are not behaving correctly on the wire; it
+      does not by itself prove a replay attack, since capture drops and
+      middlebox reordering produce similar patterns. It does mean anti-replay
+      cannot be relied upon here.
+    remediation: >
+      Check for a misconfigured load balancer or duplicate SA installation
+      before assuming an attack. On the receiver, confirm replay_window is
+      non-zero (strongSwan's charon.replay_window, default 32).
+    standards:
+      - {ref: "RFC 4303", clause: "Section 3.4.3"}
+    attack: ["T1557"]
+
+  # --- metadata exposure (cap 10) ------------------------------------------
+
+  - id: META-HIGH-EXPOSURE
+    category: metadata_exposure
+    severity: medium
+    penalty: 10
+    when: {attribute: metadata_exposure_confidence, operator: gt, value: 0.5}
+    title: Inner traffic type is identifiable from metadata alone
+    description: >
+      The traffic classifier identified what this tunnel carries with
+      confidence well above the 1-in-7 chance level, using only packet sizes
+      and timings. None of the encryption was broken; the leak is in the shape
+      of the traffic, which ESP does not conceal. An observer learns the
+      application, its activity pattern, and its duration.
+    remediation: >
+      Enable traffic-flow confidentiality padding if both peers support it
+      (RFC 4303 Section 2.7), or carry the sensitive traffic over a tunnel that
+      is already carrying constant-rate cover traffic. Accept this finding if
+      metadata exposure is not part of the threat model -- but record that it
+      was a decision.
+    standards:
+      - {ref: "RFC 4303", clause: "Section 2.7"}
+      - {ref: "NIST SP 800-77 Rev. 1", clause: "Section 3.3"}
+    attack: ["T1040"]

@@ -1,0 +1,213 @@
+{# Technical report. Step 10.3.
+
+   Every finding with its evidence, the full parameter table with provenance,
+   the methodology, the capability matrix, model versions, and a limitations
+   section that states the AES key-length case explicitly rather than burying
+   it. #}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>IPsec technical assessment</title></head>
+<body>
+
+<h1>IPsec technical assessment</h1>
+<p class="subtitle">
+  Assessment {{ a.assessment_id }} · Capture {{ a.capture_id }}<br>
+  Generated {{ generated_at }} · Engine {{ a.engine_version }} ·
+  Policy {{ a.policy_version }} ·
+  Models: {% if a.model_versions %}{% for k, v in a.model_versions.items() %}{{ k }}={{ v }} {% endfor %}{% else %}none loaded{% endif %}
+</p>
+
+<div class="score-band">
+  <div>
+    <div class="score-value rating-{{ a.score.rating }}">{{ a.score.total }}</div>
+    <div class="score-label">Score ({{ a.score.rating }})</div>
+  </div>
+  <div>
+    <div class="score-value" style="font-size: 16pt;">{{ a.findings | length }}</div>
+    <div class="score-label">Findings</div>
+  </div>
+  <div>
+    <div class="score-value" style="font-size: 16pt;">{{ a.metadata_exposure.score }}</div>
+    <div class="score-label">Metadata exposure</div>
+  </div>
+</div>
+
+<h2>Score attribution</h2>
+<table>
+  <thead><tr><th>Category</th><th class="num">Deducted</th><th class="num">Cap</th></tr></thead>
+  <tbody>
+  {% for category, penalty in a.score.category_penalties.items() %}
+    <tr>
+      <td>{{ category.value.replace('_', ' ') | capitalize }}</td>
+      <td class="num">−{{ penalty }}</td>
+      <td class="num muted">{{ category_caps[category] }}</td>
+    </tr>
+  {% endfor %}
+    <tr><td><strong>Total</strong></td>
+        <td class="num"><strong>{{ a.score.total }} / 100</strong></td><td></td></tr>
+  </tbody>
+</table>
+
+<h2>Capture quality</h2>
+<table>
+  <tbody>
+    <tr><td>Packets</td><td class="num">{{ q.packet_count }}</td></tr>
+    <tr><td>Duration</td><td class="num">{{ '%.1f' | format(q.duration_s) }} s</td></tr>
+    <tr><td>Truncated</td><td>{{ 'yes — snaplen cut packets short' if q.truncated else 'no' }}</td></tr>
+    <tr><td>IKE captured</td>
+        <td>{{ 'complete (IKE_SA_INIT observed)' if q.ike_complete else ('partial — joined mid-stream' if q.has_ike else 'none') }}</td></tr>
+    <tr><td>ESP SAs</td><td class="num">{{ q.esp_sa_count }}</td></tr>
+    <tr><td>Sufficient for cipher-family sieve</td>
+        <td>{{ 'yes' if q.sufficient_for_lattice else 'no — too few distinct ESP lengths; the detector refuses to run' }}</td></tr>
+  </tbody>
+</table>
+{% if q.warnings %}
+<ul class="small">{% for warning in q.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Negotiated parameters</h2>
+{% for sa in a.security_associations %}
+<h3>SA {{ sa.spi_initiator }}{% if sa.spi_responder %} / {{ sa.spi_responder }}{% endif %}
+    — {{ sa.src }} → {{ sa.dst }} ({{ sa.protocol | upper }}, IPv{{ sa.ip_version }})</h3>
+<p class="small muted">
+  {{ sa.packet_count }} packets, {{ sa.byte_count }} bytes,
+  {{ sa.first_seen.strftime('%Y-%m-%d %H:%M:%SZ') }} to
+  {{ sa.last_seen.strftime('%H:%M:%SZ') }}
+</p>
+<table>
+  <thead><tr><th style="width: 32%">Parameter</th><th>Value</th></tr></thead>
+  <tbody>
+  {% for label, attr in parameter_rows(sa) %}
+    <tr>
+      <td>{{ label }}</td>
+      <td>
+        {% if attr.provenance.value == 'unavailable' %}
+          {# FR-4.9: the reason is the content, never a dash. #}
+          <span class="unavailable-reason">Not determinable — {{ attr.note }}</span>
+        {% elif attr.provenance.value == 'inferred' %}
+          {{ render_value(attr.value) }}
+          <span class="prov prov-inferred">inferred, {{ (attr.confidence * 100) | round | int }}%</span>
+          {% if attr.note %}<div class="small muted">{{ attr.note }}</div>{% endif %}
+        {% else %}
+          {{ render_value(attr.value) }}
+          <span class="prov prov-observed">observed</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+
+<h2>Findings</h2>
+{% if not a.findings %}
+<p>No policy rule matched. {{ rule_count }} rules were evaluated.</p>
+{% endif %}
+{% for finding in a.findings %}
+<div class="finding">
+  <h3><span class="sev sev-{{ finding.severity }}">{{ finding.severity }}</span>
+      {{ finding.title }}
+      <span class="muted small">({{ finding.id }}, −{{ finding.penalty }})</span></h3>
+  <p>{{ finding.description | trim }}</p>
+  <p><strong>Remediation.</strong> {{ finding.remediation | trim }}</p>
+  <div class="evidence">
+    method: {{ finding.evidence.method }}<br>
+    {% if finding.evidence.packet_indices %}
+      packets: {{ finding.evidence.packet_indices | join(', ') }}{% if finding.evidence.total_matching %}
+      (of {{ finding.evidence.total_matching }} matching){% endif %}<br>
+    {% endif %}
+    {% for key, value in finding.evidence.measured.items() %}{{ key }}: {{ value }}<br>{% endfor %}
+  </div>
+  <p class="small muted">
+    {% for standard in finding.standards %}{{ standard.ref }}{% if standard.clause %} {{ standard.clause }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+    {% if finding.attack_techniques %} · ATT&amp;CK {{ finding.attack_techniques | join(', ') }}{% endif %}
+    {% if finding.sa_spi %} · SA {{ finding.sa_spi }}{% endif %}
+  </p>
+</div>
+{% endfor %}
+
+{% if a.threat_matrix %}
+<h2>ATT&amp;CK coverage</h2>
+<table>
+  <thead><tr><th>Technique</th><th>Tactics</th><th>Contributing findings</th></tr></thead>
+  <tbody>
+  {% for entry in a.threat_matrix %}
+    <tr>
+      <td>{{ entry.technique_id }} {{ entry.technique_name }}</td>
+      <td class="small">{{ entry.tactics | join(', ') }}</td>
+      <td class="small">{{ entry.finding_ids | join(', ') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Methodology</h2>
+<p>
+  This assessment derives entirely from captured traffic. No gateway was
+  queried, no configuration was read, and nothing was decrypted. IPsec leaks in
+  two distinct ways and each needs a different technique, so two are used:
+</p>
+<p>
+  <strong>Track A — deterministic parsing.</strong> The IKE negotiation is
+  partly cleartext: the IKEv2 <code>IKE_SA_INIT</code> exchange and the IKEv1
+  Phase 1 SA payloads carry proposed transforms in the open. These are read
+  with certainty and reported as <em>observed</em>. No model is involved.
+</p>
+<p>
+  <strong>Track B — statistical inference.</strong> Once the SA is established
+  everything is inside ESP: an outer IP header, an SPI, a sequence number and
+  an opaque blob. Cipher family, operating mode and inner traffic type are
+  estimated from packet geometry and flow statistics, and are reported as
+  <em>inferred</em> with a confidence.
+</p>
+
+<h2>What this method can and cannot determine</h2>
+<table>
+  <thead><tr><th>Property</th><th>Source</th><th>Certainty</th></tr></thead>
+  <tbody>
+  {% for row in capability_matrix %}
+    <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td class="small">{{ row[2] }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Limitations</h2>
+<div class="callout">
+  <p>
+    <strong>AES key length cannot be determined from ESP alone.</strong>
+    AES-128 and AES-256 produce identical packet geometry — the block size,
+    the IV length and the ICV length are the same for both — so no amount of
+    traffic analysis distinguishes them. When the IKE negotiation was not
+    captured, this assessment reports the key length as undetermined rather
+    than assuming one. A tool that reports a key length from an ESP-only
+    capture is guessing.
+  </p>
+</div>
+<p>
+  <strong>Operating mode is never observed.</strong> Tunnel versus transport
+  is not carried in any cleartext field, so it is inferred from encapsulation
+  overhead even when IKE was captured in full.
+</p>
+<p>
+  <strong>The anti-replay window size can never be reported.</strong> It is a
+  receiver-side local setting and is never transmitted. Where this report says
+  sequence numbers behave correctly, that is a statement about the wire, not a
+  statement that anti-replay is enabled.
+</p>
+<p>
+  <strong>Sequence gaps are not evidence of an attack.</strong> Capture drops
+  and reordering middleboxes produce the same pattern, so gaps are reported as
+  measurements and never as conclusions.
+</p>
+{% if not a.model_versions %}
+<p>
+  <strong>No trained models were loaded for this assessment.</strong> The
+  traffic classifier and mode classifier were unavailable, so every field that
+  depends on them is reported as undetermined. Those are absences of a model,
+  not measurements.
+</p>
+{% endif %}
+
+</body>
+</html>

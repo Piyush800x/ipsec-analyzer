@@ -44,6 +44,9 @@ if [ "$TARGET" = "all" ] || [ "$TARGET" = "testbed" ]; then
 fi
 
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "frontend" ]; then
+  # Step 6.8: a backend schema change the frontend has not absorbed must fail
+  # the build here rather than surface as an undefined in the browser.
+  run "gen-types --check" bash "$ROOT/scripts/gen-types.sh" --check
   cd "$ROOT/frontend"
   run "tsc --noEmit" npx tsc --noEmit
   run "eslint"       npm run lint

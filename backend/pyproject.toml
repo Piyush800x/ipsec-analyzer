@@ -15,6 +15,14 @@ dependencies = [
     "aiosqlite>=0.20",
     "greenlet>=3.1",
     "uuid6>=2024.7.10",
+    "dpkt>=1.9.8",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.4",
+    "python-multipart>=0.0.32",
+    "polars>=1.44.1",
+    "numpy>=2.4.6",
+    "weasyprint>=69.0",
+    "jinja2>=3.1.6",
 ]
 
 [dependency-groups]
@@ -24,6 +32,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "types-pyyaml>=6.0.12.20260815",
+    "httpx>=0.28.1",
 ]
 testbed = [
     "docker>=7.2.0",
@@ -110,7 +119,7 @@ packages = ["analyzer", "testbed"]
 exclude = "^testbed/image/"
 
 [[tool.mypy.overrides]]
-module = ["uuid6.*", "docker.*"]
+module = ["uuid6.*", "docker.*", "dpkt.*", "weasyprint.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

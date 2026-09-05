@@ -1,0 +1,113 @@
+{# Executive report. Step 10.2.
+
+   One to two pages, business language, no hex and no packet indices. The
+   test for this template is whether a non-technical reader can say what is
+   wrong and what to do about it having read only this document -- so every
+   finding here leads with its consequence, not its mechanism. #}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>IPsec security assessment</title></head>
+<body>
+
+<h1>IPsec security assessment</h1>
+<p class="subtitle">
+  Generated {{ generated_at }} · Analysis engine {{ a.engine_version }} ·
+  Policy {{ a.policy_version }}
+</p>
+
+<div class="score-band">
+  <div>
+    <div class="score-value rating-{{ a.score.rating }}">{{ a.score.total }}</div>
+    <div class="score-label">Security score, out of 100</div>
+  </div>
+  <div>
+    <div class="score-value rating-{{ a.score.rating }}" style="font-size: 16pt;">
+      {{ a.score.rating | capitalize }}
+    </div>
+    <div class="score-label">Overall rating</div>
+  </div>
+  <div>
+    <div class="score-value" style="font-size: 16pt;">{{ a.metadata_exposure.score }}</div>
+    <div class="score-label">Metadata exposure (higher is worse)</div>
+  </div>
+</div>
+
+<h2>What this means</h2>
+<p>
+  {% if a.score.total >= 80 %}
+    This deployment is configured to a current standard. The findings below are
+    refinements rather than exposures, and none of them requires urgent action.
+  {% elif a.score.total >= 60 %}
+    This deployment is broadly sound but is running at least one setting that
+    is below current guidance. The issues below are worth scheduling, not
+    escalating.
+  {% elif a.score.total >= 40 %}
+    This deployment has weaknesses that a capable attacker could work with.
+    The issues below should be scheduled deliberately rather than absorbed into
+    routine maintenance.
+  {% else %}
+    This deployment is running cryptography or protocol settings that are
+    considered broken or deprecated today. Traffic protected by it should not be
+    assumed confidential against a well-resourced observer, and the actions
+    below should be treated as urgent.
+  {% endif %}
+</p>
+
+{% if top_risks %}
+<h2>The three things that matter most</h2>
+{% for finding in top_risks %}
+<div class="finding">
+  <h3><span class="sev sev-{{ finding.severity }}">{{ finding.severity }}</span>
+      {{ finding.title }}</h3>
+  <p>{{ finding.description | trim }}</p>
+  <p><strong>What to do:</strong> {{ finding.remediation | trim }}</p>
+</div>
+{% endfor %}
+{% else %}
+<h2>Findings</h2>
+<p>
+  No policy rule matched this deployment. That is a result rather than an
+  absence of checking: {{ rule_count }} rules were evaluated against it.
+</p>
+{% endif %}
+
+<h2>What a passive observer learns</h2>
+<p>{{ a.metadata_exposure.rationale | trim }}</p>
+{% if a.metadata_exposure.score >= 50 %}
+<div class="callout">
+  <p class="small">
+    This is worth understanding separately from the score above, because it does
+    not improve when the cryptography does. The leak is in the size and timing
+    of packets, which encryption does not conceal. If the fact that this tunnel
+    carries a particular kind of traffic is itself sensitive, that needs a
+    padding strategy, not a stronger cipher.
+  </p>
+</div>
+{% endif %}
+
+<h2>Confidence in these results</h2>
+<p>
+  This assessment was produced from captured traffic alone -- no access to the
+  gateways and no decryption. Some parameters can be read directly from the
+  key-exchange negotiation; others can only be estimated from traffic patterns;
+  and some cannot be determined at all from a capture.
+  {% if unavailable_count %}
+    {{ unavailable_count }} parameter{{ 's' if unavailable_count != 1 else '' }}
+    in this assessment fall{{ '' if unavailable_count != 1 else 's' }} into that
+    last category and {{ 'are' if unavailable_count != 1 else 'is' }} reported as
+    undetermined, with the reason, in the technical report.
+  {% endif %}
+  Nothing has been guessed to fill a gap.
+</p>
+
+{% if quality_caveats %}
+<div class="callout">
+  <p class="small"><strong>Limits of this capture:</strong></p>
+  <ul class="small">
+    {% for caveat in quality_caveats %}<li>{{ caveat }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+</body>
+</html>
