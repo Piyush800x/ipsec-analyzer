@@ -182,6 +182,21 @@ that mapping, so it is here and nowhere else.
 TRAFFIC_KEYWORDS: Final[dict[TrafficClass, str]] = {v: k for k, v in TRAFFIC_LABELS.items()}
 
 
+REKEY_WINDOW_S: Final = 10
+"""Seconds between an SA's rekey time and its hard expiry.
+
+strongSwan deletes an SA that has not rekeyed within ``rekey_time +
+over_time``, so this window cannot be zero -- with no window the SA expires at
+the instant it tries to rekey, which killed a 300-second tunnel at t=300 with
+the rekey exchange on the wire and nothing after it.
+
+Ten seconds rather than strongSwan's default 10% of the rekey time, for two
+reasons. It is three orders of magnitude more than a CREATE_CHILD_SA needs, and
+it is small enough that the observed rekey interval stays within a few percent
+of the configured lifetime -- which is what step 9.3 measures, and which a 10%
+window would sit exactly on the boundary of."""
+
+
 class PeerAddressing(BaseModel):
     """The addresses one session runs on, for a single IP version."""
 
@@ -279,7 +294,7 @@ class SessionConfig(BaseModel):
     ip: IpVersion = IpVersion.V4
     traffic: TrafficClass
 
-    lifetime_s: int = Field(default=3600, gt=0)
+    lifetime_s: int = Field(default=3600, gt=REKEY_WINDOW_S)
     """Configured SA lifetime.
 
     Observable from the wire for IKEv1 only. RFC 7296 removed lifetime
@@ -343,6 +358,22 @@ class SessionConfig(BaseModel):
     @property
     def exchange_mode(self) -> IkeExchangeMode | None:
         return IKE_FLAVOURS[self.ike][1]
+
+    @property
+    def rekey_time_s(self) -> int:
+        """When strongSwan should rekey, ``REKEY_WINDOW_S`` before hard expiry.
+
+        ``lifetime_s`` is the *hard* lifetime -- the value IKEv1 puts on the
+        wire and the one ``labels.json`` claims a parser will read. strongSwan
+        derives that as ``rekey_time + over_time``, so the rekey time is the
+        configured lifetime minus the window rather than the lifetime itself.
+        """
+        return self.lifetime_s - REKEY_WINDOW_S
+
+    @property
+    def over_time_s(self) -> int:
+        """The window between rekeying and hard expiry. See ``rekey_time_s``."""
+        return REKEY_WINDOW_S
 
     @property
     def addressing(self) -> PeerAddressing:
