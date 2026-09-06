@@ -17,6 +17,136 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Open spec question — LLD §7.6's window floor makes PRD §9.2's sparsest class unlearnable
+
+Found by counting scorable windows per class across the finished dataset, and
+it is a conflict between two specifications rather than a bug in either
+implementation of them.
+
+LLD §7.6 requires fixed 10-second windows and says "a window needs at least 20
+packets to be scored". PRD §9.2 requires a `messaging` class, defined by its
+silences — small payloads separated by long irregular gaps. The testbed's
+generator realises that as a 1–12 second idle gap around each
+message-and-reply, which produces roughly one packet per second.
+
+Ten seconds at one packet per second is seven to ten packets. The floor is
+twenty. **Every messaging window in the dataset is discarded, so the class
+contributes zero training rows:**
+
+```
+class          sessions   windows/session (sampled)
+email                32   [14, 19, 19]
+file_transfer        48   [18, 18, 18]
+icmp                 28   [19, 18, 18]
+messaging            32   [ 0,  0,  0]
+video                32   [18, 18, 18]
+voip                 36   [18, 18, 18]
+web                  40   [19, 19, 19]
+```
+
+A longer session does not help: this is a rate, not a duration. At the matrix's
+own 180-second default the packet count doubles and the per-window count does
+not move.
+
+**The consequence for PRD §8.4's target.** Macro-F1 is defined over the seven
+classes. With one class absent from both training and test, a model that is
+perfect on the other six scores 6/7 = 0.857 — a figure that would sit just
+above the 0.85 threshold while the classifier had never seen a seventh of the
+problem. Reporting it that way would be the most misleading number this project
+could produce, so `metrics.json` and the model card record the class count the
+score is actually computed over.
+
+**This was not resolved by retuning the generator.** Raising the messaging
+packet rate until windows clear the floor would make the target met by
+changing the data, which is the failure this project has spent its whole
+lifetime guarding against. Two defensible resolutions exist and both are
+decisions about the specification rather than about the code:
+
+1. **Enrich the messaging model.** The generator sends messages and replies and
+   nothing else. Real XMPP or Signal traffic also carries presence updates,
+   typing indicators, delivery and read receipts, and keepalives, all of which
+   are genuine messaging packets. A model including them would clear the floor
+   *and* be more faithful, not less.
+2. **Make the window floor rate-aware.** The floor exists because percentile
+   features over three packets are noise. For a class whose defining property
+   *is* sparsity, discarding the sparse windows throws away precisely the
+   evidence that identifies it. A floor expressed as "enough packets to
+   estimate the features, or enough elapsed time at a stable low rate" would
+   admit messaging without admitting noise.
+
+Until one is chosen, the traffic classifier is a six-class model and is
+reported as one.
+
+### Fixed — the observed rekey interval was 0 seconds on every capture
+
+Reported as INFERRED at 0.95 confidence, which is the combination this project
+exists to prevent: a number, stated with near-certainty, that was never
+measured.
+
+`service.analyse` built its SPI series from a single `SAPair` — its forward
+SPI and its reverse SPI. Those are the two *directions* of one SA generation
+and they come up at the same instant, so the only interval available was
+between them, and it was always approximately zero. A rekey installs a new
+Child SA, hence a new SPI, which `ingest.assemble_flows` groups into a wholly
+**separate** `SAPair`; successive generations of a tunnel were therefore never
+visible from inside the pair being analysed.
+
+`replay.spi_series` now groups SPIs by *directed* endpoint pair across the
+whole capture, and `api/pipeline.py` hands each SA the series for its own
+direction. Directed rather than unordered because merging both directions
+reintroduces the same fault one level down: each generation contributes two
+simultaneous entries, so every other interval in the merged series is a
+spurious zero and the median collapses back to it.
+
+**Blast radius.** No rule in `policies/baseline.yaml` reads
+`observed_rekey_s`, so no score or finding was ever wrong because of this. What
+was wrong is the technical report, which renders "Observed rekey interval (s)"
+directly, and `Assessment.capabilities.rekey_observed`, which claimed the
+measurement had been made.
+
+**Done when — an observed rekey interval within 10% of a 300-second
+lifetime.** Demonstrated on a real 700-second capture from
+`testbed/rekey_probe.py`, which exists because nothing in the sampled matrix
+can produce one (every matrix row runs a 3600-second lifetime for 90 seconds,
+so no dataset session ever rekeys inside its own capture):
+
+```
+10.10.3.2 -> 10.10.3.3: SPI first-seen offsets 0.0, 288.5, 578.5
+   observed_rekey_s = 290s (inferred, confidence 0.95)
+   vs 300s configured: 3.3% -> WITHIN 10%
+10.10.3.3 -> 10.10.3.2: SPI first-seen offsets 0.0, 288.4, 578.5
+   observed_rekey_s = 290s (inferred, confidence 0.95)
+```
+
+Three generations, two rotations. Two rather than one on purpose: a single
+rotation cannot distinguish "rekeyed on time" from "rekeyed once, for some
+other reason".
+
+### Fixed — `over_time = 0s` stopped SAs rekeying at all
+
+A defect introduced by this project's own earlier fix, and found by the probe
+above rather than by any test.
+
+Zeroing `over_time` made the negotiated lifetime equal the configured one,
+which was the point. It also meant strongSwan deleted each SA at the exact
+instant it tried to rekey — the daemon expires an SA that has not rekeyed
+within `rekey_time + over_time`, and with no window there is nothing to rekey
+in. A 300-second tunnel captured for 700 seconds died at t=300 with the rekey
+exchange on the wire and 400 seconds of silence after it, while the session was
+recorded as successful.
+
+The dataset never saw it: at a 3600-second lifetime and 90-second sessions, no
+SA comes within an hour of expiry. That is the only reason this was not a
+corrupt corpus.
+
+`lifetime_s` now means the **hard lifetime that IKEv1 puts on the wire** —
+which is what `labels.json` claims it is — with `rekey_time` derived
+`REKEY_WINDOW_S` (10 seconds) below it. The negotiated value is unchanged, so
+sessions generated before and after this change agree; the SA now has a window
+three orders of magnitude larger than a CREATE_CHILD_SA needs; and the observed
+interval lands within a few percent of the configured lifetime rather than on
+the 10% boundary a proportional window would put it on.
+
 ### Fixed — Track A observed *nothing* on real captures, and its tests could not tell
 
 The single most serious defect this project has had. Phase 4 was written with
@@ -94,12 +224,17 @@ which it was not before.
 the *hard* lifetime on the wire. Track A was reading it correctly; the label
 was wrong.
 
-Fixed in `swanctl.conf.j2` (`over_time = 0s`, alongside the `rand_time = 0s`
-that was already there for the same reason) rather than by teaching the label
-about strongSwan's arithmetic — the configured value should be the negotiated
-value, which is what the ground truth claims it is. `over_time` is accepted on
-the connection only; a child block carrying it fails the whole connection with
+Fixed in `swanctl.conf.j2` rather than by teaching the label about
+strongSwan's arithmetic — the configured value should be the negotiated value,
+which is what the ground truth claims it is. `over_time` is accepted on the
+connection only; a child block carrying it fails the whole connection with
 `unknown option: over_time`, which is verified empirically rather than assumed.
+
+**The first attempt at this — `over_time = 0s` — was wrong, and is superseded
+by "`over_time = 0s` stopped SAs rekeying at all" above.** It produced the
+right negotiated value and stopped every SA rekeying, which no test and no
+dataset session could see. The correct form keeps a small non-zero window and
+derives `rekey_time` below the configured lifetime instead.
 
 ### Added — key lengths that the cipher fixes rather than negotiates
 

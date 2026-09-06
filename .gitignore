@@ -57,8 +57,9 @@ backend/models/calibration.json
 
 # The batch logs of a generation run. Several megabytes of per-session INFO
 # lines whose useful content is already summarised in CHANGELOG.md.
-dataset/gen-*.log
+dataset/gen*.log
 dataset/pilot*.log
+dataset/verify.log
 
 # metrics.json, reliability_cnn.json and external_validation.json are NOT
 # ignored, deliberately. They are the *measurements* -- what the models scored

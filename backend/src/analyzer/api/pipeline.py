@@ -40,6 +40,7 @@ from analyzer.track_a.ike_parser import (
     parse_isakmp_json,
     run_tshark,
 )
+from analyzer.track_b import replay
 from analyzer.track_b.service import InferenceService
 
 log = logging.getLogger(__name__)
@@ -149,6 +150,10 @@ def analyse_capture(
     # a deployment shipped the code without the artefacts still produces a
     # complete assessment, honest about what it could not determine.
     service = InferenceService(model_dir)
+    # Rekey timing needs the whole capture, not one SA: a rekey installs a new
+    # SPI, which ingest groups into a *separate* SAPair, so successive
+    # generations of one tunnel are invisible from inside any single pair.
+    rekey_series = replay.spi_series(sa_pairs)
     security_associations = [
         service.apply(
             sa,
@@ -156,6 +161,7 @@ def analyse_capture(
                 pair,
                 quality,
                 dh_group=sa.dh_group.value,
+                spi_first_seen=rekey_series.get((pair.forward.key.src, pair.forward.key.dst), ()),
                 **_pfs_sizes(sizes, pair),
             ),
         )

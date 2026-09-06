@@ -256,15 +256,12 @@ class InferenceService:
         dh_group: int | None = None,
         create_child_sizes: Sequence[int] = (),
         baseline_sizes: Sequence[int] = (),
+        spi_first_seen: Sequence[tuple[int, float]] = (),
     ) -> TrackBResult:
         packets = list(pair.forward.packets) + list(pair.reverse.packets if pair.reverse else ())
         esp_lengths = [
             p.esp_payload_len for p in packets if p.proto == "esp" and p.esp_payload_len is not None
         ]
-
-        spi_first_seen: list[tuple[int, float]] = [(pair.forward.key.spi, pair.forward.start_ts)]
-        if pair.reverse:
-            spi_first_seen.append((pair.reverse.key.spi, pair.reverse.start_ts))
 
         # ML-1 first, then ML-2 with ML-1's output as a feature. LLD section 7.3
         # breaks the circularity in this direction only, and the ordering here
