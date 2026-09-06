@@ -32,12 +32,19 @@ ENV PYTHONUNBUFFERED=1 \
 # wireshark-common asks, via debconf, whether non-root users may capture. We
 # only ever read PCAP files from disk -- NFR-5 forbids this tool from putting a
 # packet on the wire at all -- so answer no and skip the dumpcap setuid step.
+# WeasyPrint (Phase 10) renders the PDF reports through Pango and Cairo, which
+# are system libraries rather than wheels -- without them `import weasyprint`
+# fails at load with an OSError about libpango, which reads as a Python problem
+# and is not one. The DejaVu fonts are what base.css asks for by name; without
+# them WeasyPrint silently substitutes and the reports reflow.
 RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
       | debconf-set-selections \
  && apt-get update \
  && apt-get install --no-install-recommends -y \
       "wireshark-common=${TSHARK_DEB_VERSION}" \
       "tshark=${TSHARK_DEB_VERSION}" \
+      libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
+      fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 
 # Fail the build, not the demo, if the installed binary is not what we pinned.
@@ -56,6 +63,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY src ./src
 COPY alembic ./alembic
+COPY alembic.ini ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -67,7 +75,10 @@ RUN useradd --create-home --uid 10001 analyzer \
  && chown -R analyzer:analyzer /app /data
 USER analyzer
 
-# The API entrypoint arrives in Phase 6 (step 6.1). Until then this image exists
-# to carry the pinned toolchain, so it drops you in a shell rather than
-# pretending to serve something.
-CMD ["bash"]
+EXPOSE 8000
+
+# `--factory` because create_app() builds the engine, session factory, policy
+# and job runner itself (step 6.1); there is no module-level `app` to import,
+# deliberately, so that tests can build one against a throwaway database.
+CMD ["uvicorn", "analyzer.api.main:create_app", "--factory", \
+     "--host", "0.0.0.0", "--port", "8000"]

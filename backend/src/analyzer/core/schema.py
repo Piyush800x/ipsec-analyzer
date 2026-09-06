@@ -563,6 +563,17 @@ class SecurityAssociation(AnalyzerModel):
     nat_traversal: Attribute[bool]
     """UDP/4500 encapsulation, or NAT_DETECTION notify payloads. FR-3.6."""
 
+    downgrade_available: Attribute[bool]
+    """Whether a weaker proposal than the selected one was offered.
+
+    LLD section 6.3 puts this on Track A's ``IkeNegotiation`` and the policy's
+    ``CRYPTO-DOWNGRADE-OFFER`` rule keys on it, but LLD section 3 gives it
+    nowhere to live in the document the rule evaluates -- so it is carried
+    here. Offering 3DES alongside AES-256 is a real weakness even when AES-256
+    was chosen, because an active attacker who can influence the negotiation
+    may force the weaker option.
+    """
+
     inner_traffic: list[TrafficPrediction] = Field(default_factory=list)
 
     @model_validator(mode="after")

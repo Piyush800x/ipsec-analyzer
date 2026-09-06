@@ -146,11 +146,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Build first: Next 16 writes the typed-route definitions to
+      # .next/types during a build, so `tsc --noEmit` on a clean checkout
+      # fails with phantom PageProps errors until one has run.
+      - name: Build
+        run: npm run build
+
       - name: tsc --noEmit
         run: npx tsc --noEmit
 
       - name: ESLint
         run: npm run lint
-
-      - name: Build
-        run: npm run build

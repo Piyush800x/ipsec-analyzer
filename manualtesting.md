@@ -63,6 +63,12 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-12 | Testbed builds a real kernel-ESP tunnel | 0.1, 0.2, 2.1 | 2026-09-04 | Pass |
 | MT-13 | The seven traffic classes look different | 2.6 | 2026-09-04 | Pass |
 | MT-14 | A batch resumes where it was killed | 2.10 | 2026-09-04 | Pass |
+| MT-15 | Reader packet count matches tshark on a real capture | 3.2 | — | **Not run** |
+| MT-16 | Track A matches labels.json on a real testbed capture | 4.8 | — | **Not run** |
+| MT-17 | Both reports read correctly to their audience | 10.2, 10.3 | 2026-09-05 | Pass |
+| MT-18 | The offline stack runs with no outbound network | 11.4 | — | **Not run** |
+| MT-19 | Demo rehearsal, three clean runs | 11.6 | — | **Not run** |
+| MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 (Windows only) | Pass (Windows); **Linux not run** |
 
 ---
 
@@ -578,6 +584,231 @@ fully subnetted" — that says nothing about the cause.
 > Note: pipe the batch to a file, not to `head`. Truncating the pipe sends
 > `SIGPIPE` to the batch mid-session and produces a spurious "cannot exec in a
 > stopped container" failure that looks like a testbed bug and is not one.
+
+---
+
+## MT-15 — Reader packet count matches tshark on a real capture
+
+**Proves** step 3.2. The automated suite (`tests/test_ingest_reader.py`)
+validates the reader's decoding logic against synthetic pcap files built by
+hand, because no Docker daemon was available to produce a real testbed
+capture when Phase 3 landed. That is a test of the code against itself; it is
+not step 3.2's actual Done-when condition, which compares against `tshark` on
+a real capture from the Phase 2 testbed.
+
+```bash
+cd backend
+uv run python -m testbed.batch /tmp/mt15 --limit 1 --duration 30
+CAP=/tmp/mt15/*/capture.pcap
+tshark -r $CAP | wc -l
+uv run python -c "
+from pathlib import Path
+from analyzer.ingest.reader import read_packets
+import glob
+path = Path(glob.glob('/tmp/mt15/*/capture.pcap')[0])
+print(len(read_packets(path).packets))
+"
+```
+
+**Expect** the two counts to match exactly.
+
+**If they do not match**, check first whether the difference is pcapng versus
+classic pcap — `ingest/reader.py` only reads classic pcap, matching what
+`testbed/capture.py`'s `tcpdump -w` produces, and will raise `IngestError`
+rather than silently misreport on anything else.
+
+> Not yet run. Needs Docker and a kernel with XFRM (same prerequisites as
+> MT-12) plus a `tshark` binary on the host, none of which were available
+> where Phase 3 was implemented. Run this before treating step 3.2 as more
+> than "passes its own tests."
+
+---
+
+## MT-16 — Track A matches labels.json on a real testbed capture
+
+**Proves** step 4.8, and is the single most important check in this file for
+Track A's credibility. The automated suite (`tests/test_track_a_*.py`)
+validates every parsing rule against hand-built tshark JSON, because no
+tshark binary was available when Phase 4 landed — see CHANGELOG.md's Phase 4
+"Not verified" entry. That proves the parsing *logic*; it says nothing about
+whether tshark's real JSON matches what `ike_parser.py` assumes it calls
+things, which is exactly the failure mode LLD section 6.1 warns is silent.
+
+```bash
+cd backend
+uv run python -m testbed.batch /tmp/mt16 --limit 1 --duration 30
+DIR=$(dirname "$(ls /tmp/mt16/*/capture.pcap)")
+tshark -r "$DIR/capture.pcap" -Y isakmp -T json --no-duplicate-keys > /tmp/mt16.json
+uv run python -c "
+import json
+from pathlib import Path
+from analyzer.ingest.reader import read_packets
+from analyzer.ingest.flow import assemble_flows
+from analyzer.track_a.correlate import run_track_a
+
+d = Path('$DIR')
+packets = read_packets(d / 'capture.pcap').packets
+pairs = assemble_flows(packets)
+sas = run_track_a(d / 'capture.pcap', pairs)
+expected = json.loads((d / 'labels.json').read_text())['expected']
+for sa in sas:
+    print('ike_version:', sa.ike_version.value, 'vs', expected['ike_version'])
+    print('dh_group:', sa.dh_group.value, 'vs', expected['dh_group'])
+    print('encryption_alg (INFERRED, may legitimately differ):', sa.encryption_alg.value, 'vs', expected['encryption_alg'])
+"
+```
+
+**Expect** `ike_version`, `ike_exchange_mode` (IKEv1 only), `dh_group`,
+`prf_alg` (IKEv2 only), `auth_method` and `negotiated_lifetime_s` (IKEv1
+only) to match `expected` exactly, with `OBSERVED` provenance. **Do not**
+expect `encryption_alg`/`encryption_keylen`/`integrity_alg` to match when the
+session's ESP suite is a GCM variant — CHANGELOG's Phase 4 open spec question
+explains why the same-family `INFERRED` guess is expected to diverge there,
+and that is correct behaviour, not a bug.
+
+**If the raw JSON's field names do not match what `ike_parser.py` assumes**
+(check `_find_first`/`_find_by_suffix` calls in `parse_isakmp_json` and its
+helpers against the actual keys in `/tmp/mt16.json`), that is the real
+finding this check exists to make. Fix the adapter, not the assumption.
+
+> Not yet run. Needs Docker, a kernel with XFRM, and a `tshark` binary on the
+> host (same prerequisites as MT-12 and MT-15), none of which were available
+> where Phase 4 was implemented. This is the highest-priority manual check
+> outstanding in this file.
+
+---
+
+## MT-17 — Both reports read correctly to their audience
+
+**Proves** steps 10.2 and 10.3. The automated tests assert that specific
+sentences are present; whether the executive report is *actually readable by a
+non-technical reader* is not something a test can decide, and it is the
+Done-when.
+
+```bash
+cd backend
+uv run python -c "
+from pathlib import Path
+from analyzer.core.schema import Assessment
+from analyzer.report.render import render_pdf
+a = Assessment.model_validate_json(Path('tests/fixtures/assessment_weak.json').read_text())
+for fmt in ('executive', 'technical'):
+    Path(f'/tmp/{fmt}.pdf').write_bytes(render_pdf(a, fmt, rule_count=14))
+"
+xdg-open /tmp/executive.pdf
+```
+
+**Expect**, reading only the executive PDF and knowing nothing about IPsec:
+you can say what is wrong ("it uses an obsolete cipher and an exchange mode
+that leaks the password hash") and what to do about it ("switch to AES-256-GCM
+and IKEv2, rotate the pre-shared key"). No hex, no packet numbers, no rule IDs.
+
+**Expect**, in the technical PDF: every finding carries its evidence; the
+parameter table shows observed/inferred/unavailable per row with the reason
+spelled out for each unavailable one; and the limitations section states the
+AES key-length case explicitly.
+
+> Last verified 2026-09-05 · Pass. Both render from the fixtures; the
+> executive report is 2 pages and the technical 6. The unavailable rows read
+> as sentences rather than dashes, which was the thing worth checking by eye.
+
+---
+
+## MT-18 — The offline stack runs with no outbound network
+
+**Proves** step 11.4, NFR-3 and NFR-6. Compose topology is the kind of claim
+that is either true or quietly false, and only a run tells you which.
+
+```bash
+docker compose -f docker-compose.offline.yml up --build -d
+docker compose -f docker-compose.offline.yml ps
+
+# The backend must have no route off the box at all.
+docker compose -f docker-compose.offline.yml exec backend \
+  python -c "import socket; socket.create_connection(('1.1.1.1', 53), timeout=5)"
+```
+
+**Expect** both services healthy, <http://localhost:3000> serving the
+dashboard, and that last command to **fail** with a network-unreachable error.
+If it succeeds, the `internal: true` network is not doing what the file claims
+and NFR-6 is unproven.
+
+Then upload a capture through the UI and confirm an assessment appears.
+
+> Not yet run. Needs Docker, which was not available where Phase 11 was
+> implemented. The compose file and both Dockerfiles exist and the frontend's
+> standalone build is verified; the stack has never been started.
+
+---
+
+## MT-19 — Demo rehearsal, three clean runs
+
+**Proves** step 11.6. Rehearse on the offline stack — Neon scales to zero and
+a cold start mid-demo is an avoidable risk.
+
+Run the PRD §16 script end to end three times: upload the weak capture,
+analyse, walk the findings, open the comparison against the hardened one,
+download the executive report. Time it against the two-minute target.
+
+**Expect** three consecutive runs with no restarts, no stalls on the progress
+bar, and the comparison view rendering both tunnels side by side.
+
+> Not yet run. Blocked on MT-18 (Docker) and on step 11.5's demo captures,
+> which need the testbed.
+
+---
+
+## MT-20 — The backend starts and reports on Windows *and* Linux
+
+**Proves** that the API has no hidden native-library dependency at import
+time, and that the PDF backend's absence degrades instead of crashing.
+
+An automated test cannot settle this alone: the failure it guards was an
+`OSError` raised during *module import*, which takes the test suite down at
+collection rather than failing a test. `test_importing_the_api_does_not_import_weasyprint`
+covers the import graph in a subprocess, but only a human running the real
+server on each OS confirms the whole path.
+
+Run this on **both** a Windows box with no GTK runtime and a Linux box with
+WeasyPrint's libraries installed. The two are expected to differ in exactly
+one place, marked below.
+
+```bash
+cd backend
+uv run pytest                       # must collect and run everything
+uv run uvicorn analyzer.api.main:create_app --factory --port 8000
+```
+
+In a second shell, with `<id>` from an assessment you have analysed:
+
+```bash
+curl -s localhost:8000/api/v1/health
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
+  "localhost:8000/api/v1/assessments/<id>/report?format=technical&inline=1"
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
+  "localhost:8000/api/v1/assessments/<id>/report?format=technical"
+```
+
+**Expect**
+
+| | Windows, no GTK | Linux, WeasyPrint installed |
+|---|---|---|
+| `pytest` | passes, PDF tests **skipped** | passes, PDF tests **run** |
+| server startup | clean | clean |
+| `/health` | `{"status":"ok",...}` | same |
+| report `?inline=1` | `200 text/html` | `200 text/html` |
+| report as PDF | `503 application/problem+json` | `200 application/pdf` |
+
+**Watch for** the 503's `detail` naming both the way out now (`?inline=1`)
+and the fix (the GTK3 runtime). A 503 with a bare title is the failure this
+check exists to catch — it leaves the reader with a dead end. Also watch for
+WeasyPrint's multi-line installation banner appearing on stdout more than
+once across repeated PDF requests: that means the failed-import cache
+regressed and the dlopen probe is re-running per request.
+
+> Last verified 2026-09-06 · Windows 10 Pro 19045 · **Pass on Windows**;
+> Linux half **not run** — no Linux host available in this environment. The
+> Linux column is what CI exercises on push, minus the manual curl steps.
 
 ---
 
