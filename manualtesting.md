@@ -68,6 +68,7 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-17 | Both reports read correctly to their audience | 10.2, 10.3 | 2026-09-05 | Pass |
 | MT-18 | The offline stack runs with no outbound network | 11.4 | — | **Not run** |
 | MT-19 | Demo rehearsal, three clean runs | 11.6 | — | **Not run** |
+| MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 (Windows only) | Pass (Windows); **Linux not run** |
 
 ---
 
@@ -754,6 +755,60 @@ bar, and the comparison view rendering both tunnels side by side.
 
 > Not yet run. Blocked on MT-18 (Docker) and on step 11.5's demo captures,
 > which need the testbed.
+
+---
+
+## MT-20 — The backend starts and reports on Windows *and* Linux
+
+**Proves** that the API has no hidden native-library dependency at import
+time, and that the PDF backend's absence degrades instead of crashing.
+
+An automated test cannot settle this alone: the failure it guards was an
+`OSError` raised during *module import*, which takes the test suite down at
+collection rather than failing a test. `test_importing_the_api_does_not_import_weasyprint`
+covers the import graph in a subprocess, but only a human running the real
+server on each OS confirms the whole path.
+
+Run this on **both** a Windows box with no GTK runtime and a Linux box with
+WeasyPrint's libraries installed. The two are expected to differ in exactly
+one place, marked below.
+
+```bash
+cd backend
+uv run pytest                       # must collect and run everything
+uv run uvicorn analyzer.api.main:create_app --factory --port 8000
+```
+
+In a second shell, with `<id>` from an assessment you have analysed:
+
+```bash
+curl -s localhost:8000/api/v1/health
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
+  "localhost:8000/api/v1/assessments/<id>/report?format=technical&inline=1"
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
+  "localhost:8000/api/v1/assessments/<id>/report?format=technical"
+```
+
+**Expect**
+
+| | Windows, no GTK | Linux, WeasyPrint installed |
+|---|---|---|
+| `pytest` | passes, PDF tests **skipped** | passes, PDF tests **run** |
+| server startup | clean | clean |
+| `/health` | `{"status":"ok",...}` | same |
+| report `?inline=1` | `200 text/html` | `200 text/html` |
+| report as PDF | `503 application/problem+json` | `200 application/pdf` |
+
+**Watch for** the 503's `detail` naming both the way out now (`?inline=1`)
+and the fix (the GTK3 runtime). A 503 with a bare title is the failure this
+check exists to catch — it leaves the reader with a dead end. Also watch for
+WeasyPrint's multi-line installation banner appearing on stdout more than
+once across repeated PDF requests: that means the failed-import cache
+regressed and the dlopen probe is re-running per request.
+
+> Last verified 2026-09-06 · Windows 10 Pro 19045 · **Pass on Windows**;
+> Linux half **not run** — no Linux host available in this environment. The
+> Linux column is what CI exercises on push, minus the manual curl steps.
 
 ---
 

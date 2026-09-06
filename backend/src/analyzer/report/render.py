@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
-from weasyprint import CSS, HTML
 
 from analyzer.core.enums import CATEGORY_CAPS, Provenance, Severity
 from analyzer.core.schema import Assessment, Attribute, SecurityAssociation
@@ -26,6 +25,33 @@ TEMPLATE_DIR: Final = Path(__file__).parent / "templates"
 CSS_PATH: Final = TEMPLATE_DIR / "base.css"
 
 ReportFormat = Literal["executive", "technical"]
+
+
+class PdfBackendUnavailableError(RuntimeError):
+    """WeasyPrint's native libraries are not installed on this machine.
+
+    WeasyPrint binds to Pango, Cairo and GObject through cffi at *import*
+    time, so a missing GTK stack raises ``OSError`` from the import statement
+    rather than from the first render. Importing it at module scope therefore
+    took down the entire API on any machine without those libraries -- Windows
+    without the GTK runtime most of all, where nothing installs them by
+    default -- and the traceback named ``libgobject-2.0-0``, which reads like
+    a Python packaging fault and is not one.
+
+    HTML rendering needs none of it: that path is Jinja2 and nothing else. So
+    the import is deferred to the one function that genuinely needs a PDF, and
+    this error carries the fix rather than the cffi traceback.
+    """
+
+
+PDF_BACKEND_HINT: Final = (
+    "PDF rendering needs WeasyPrint's native libraries (Pango, Cairo, GObject), which are "
+    "not installed here. HTML rendering is unaffected -- add ?inline=1 to the report URL. "
+    "To enable PDFs: on Windows install the GTK3 runtime from "
+    "https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases "
+    "and open a new shell; on Debian/Ubuntu install libpango-1.0-0, libpangoft2-1.0-0 and "
+    "libcairo2; on macOS run `brew install pango`."
+)
 
 TOP_RISK_COUNT: Final = 3
 """Step 10.2: "top three risks". Three is a number an executive summary can
@@ -174,13 +200,63 @@ def render_html(assessment: Assessment, report_format: ReportFormat, *, rule_cou
     return template.render(**_context(assessment, rule_count))
 
 
+_PDF_BACKEND: tuple[Any, Any] | None = None
+_PDF_BACKEND_FAILURE: Exception | None = None
+"""Both outcomes of the probe are cached, deliberately.
+
+``functools.cache`` would only memoise the success: it re-raises through to
+the caller without storing the exception, so every request on a machine
+without GTK would re-run the dlopen probe and re-print WeasyPrint's
+multi-line installation banner to stdout. A *failed* import is not cached in
+``sys.modules`` either -- Python drops the half-built module -- so the probe
+genuinely does repeat unless something here remembers that it failed."""
+
+
+def _weasyprint() -> tuple[Any, Any]:
+    """Import WeasyPrint on demand, as ``(CSS, HTML)``.
+
+    ``OSError`` is caught alongside ``ImportError`` because that is the shape
+    a missing GTK stack takes: the package imports cleanly, its cffi bindings
+    then fail to dlopen the shared library.
+    """
+    global _PDF_BACKEND, _PDF_BACKEND_FAILURE
+
+    if _PDF_BACKEND is not None:
+        return _PDF_BACKEND
+    if _PDF_BACKEND_FAILURE is not None:
+        raise PdfBackendUnavailableError(PDF_BACKEND_HINT) from _PDF_BACKEND_FAILURE
+
+    try:
+        from weasyprint import CSS, HTML
+    except (ImportError, OSError) as exc:
+        _PDF_BACKEND_FAILURE = exc
+        raise PdfBackendUnavailableError(PDF_BACKEND_HINT) from exc
+
+    _PDF_BACKEND = (CSS, HTML)
+    return _PDF_BACKEND
+
+
+def pdf_backend_available() -> bool:
+    """Whether this machine can render PDFs."""
+    try:
+        _weasyprint()
+    except PdfBackendUnavailableError:
+        return False
+    return True
+
+
 def render_pdf(
     assessment: Assessment, report_format: ReportFormat, *, rule_count: int = 0
 ) -> bytes:
-    """Render to PDF bytes. Steps 10.1-10.3."""
+    """Render to PDF bytes. Steps 10.1-10.3.
+
+    Raises ``PdfBackendUnavailableError`` when the native libraries are
+    missing. Callers that can degrade should offer ``render_html`` instead.
+    """
+    css, html_cls = _weasyprint()
     html = render_html(assessment, report_format, rule_count=rule_count)
-    document = HTML(string=html, base_url=str(TEMPLATE_DIR)).render(
-        stylesheets=[CSS(filename=str(CSS_PATH))]
+    document = html_cls(string=html, base_url=str(TEMPLATE_DIR)).render(
+        stylesheets=[css(filename=str(CSS_PATH))]
     )
     pdf: bytes = document.write_pdf()
     return pdf

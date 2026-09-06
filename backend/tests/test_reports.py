@@ -9,6 +9,8 @@ report leaking into the executive one.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,11 +19,21 @@ from analyzer.core.schema import Assessment
 from analyzer.report.render import (
     CAPABILITY_MATRIX,
     TOP_RISK_COUNT,
+    pdf_backend_available,
     render_html,
     render_pdf,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+needs_pdf_backend = pytest.mark.skipif(
+    not pdf_backend_available(),
+    reason=(
+        "WeasyPrint's native libraries (Pango/Cairo/GObject) are not installed. "
+        "Only the PDF assertions need them; every content assertion below runs "
+        "on HTML and is unaffected. See render.PDF_BACKEND_HINT."
+    ),
+)
 
 
 def _fixture(name: str) -> Assessment:
@@ -36,6 +48,7 @@ def assessment(request: pytest.FixtureRequest) -> Assessment:
 # --- step 10.1: both templates render to PDF from a fixture ----------------
 
 
+@needs_pdf_backend
 @pytest.mark.parametrize("report_format", ["executive", "technical"])
 def test_renders_a_real_pdf(assessment: Assessment, report_format: str) -> None:
     """Step 10.1 Done-when."""
@@ -46,6 +59,7 @@ def test_renders_a_real_pdf(assessment: Assessment, report_format: str) -> None:
     assert len(pdf) > 5_000
 
 
+@needs_pdf_backend
 @pytest.mark.parametrize("report_format", ["executive", "technical"])
 def test_pdf_has_pages(assessment: Assessment, report_format: str) -> None:
     """WeasyPrint compresses its object streams, so the page objects are not
@@ -224,3 +238,41 @@ def test_html_rendering_is_deterministic(assessment: Assessment) -> None:
     assert render_html(assessment, "technical", rule_count=14) == render_html(
         assessment, "technical", rule_count=14
     )
+
+
+# --- cross-platform: WeasyPrint must not be a startup dependency -----------
+
+
+def test_importing_the_api_does_not_import_weasyprint() -> None:
+    """The regression this guards is severe and silent-looking.
+
+    WeasyPrint's cffi bindings dlopen Pango/Cairo/GObject at *import* time, so
+    a module-level ``from weasyprint import ...`` anywhere in the API's import
+    graph made ``uvicorn analyzer.api.main:create_app`` fail outright on every
+    machine without a GTK stack -- which is every stock Windows install. The
+    traceback named ``libgobject-2.0-0`` and read like a broken Python
+    package, so it did not point at the report renderer at all.
+
+    A subprocess, because ``weasyprint`` may already be in this process's
+    ``sys.modules`` from another test.
+    """
+    probe = (
+        "import sys;import analyzer.api.main as m;m.create_app();print('weasyprint' in sys.modules)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.strip().endswith("False"), result.stdout
+
+
+def test_pdf_backend_probe_is_cached() -> None:
+    """A failed import is not cached in ``sys.modules`` -- Python discards the
+    half-built module -- so without the module-level cache every report
+    request on a GTK-less machine re-runs the dlopen probe and re-prints
+    WeasyPrint's installation banner to stdout."""
+    from analyzer.report import render
+
+    first = render.pdf_backend_available()
+    assert render._PDF_BACKEND is not None or render._PDF_BACKEND_FAILURE is not None
+    assert render.pdf_backend_available() is first

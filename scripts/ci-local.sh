@@ -48,9 +48,12 @@ if [ "$TARGET" = "all" ] || [ "$TARGET" = "frontend" ]; then
   # the build here rather than surface as an undefined in the browser.
   run "gen-types --check" bash "$ROOT/scripts/gen-types.sh" --check
   cd "$ROOT/frontend"
+  # `next build` first, and not for speed: Next 16 generates the typed-route
+  # definitions under .next/types during a build, so on a clean checkout
+  # `tsc --noEmit` fails with ~10 phantom PageProps errors until one has run.
+  run "next build"   npm run build
   run "tsc --noEmit" npx tsc --noEmit
   run "eslint"       npm run lint
-  run "next build"   npm run build
 fi
 
 echo ""

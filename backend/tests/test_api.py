@@ -22,10 +22,20 @@ from analyzer.api.main import API_PREFIX, create_app
 from analyzer.core.config import Settings
 from analyzer.db.models import Base
 from analyzer.db.session import create_db_engine
+from analyzer.report.render import (
+    PDF_BACKEND_HINT,
+    PdfBackendUnavailableError,
+    pdf_backend_available,
+)
 from tests._pcap import DLT_EN10MB, esp_payload, eth_frame, ipv4_packet, udp_packet, write_pcap
 from tests.conftest import postgres_url
 
 BASELINE = Path(__file__).resolve().parents[1] / "src/analyzer/assess/policies/baseline.yaml"
+
+needs_pdf_backend = pytest.mark.skipif(
+    not pdf_backend_available(),
+    reason="WeasyPrint's native libraries are not installed; see render.PDF_BACKEND_HINT",
+)
 
 
 def _database_url(backend: str, tmp_path: Path) -> str:
@@ -380,6 +390,7 @@ async def test_endpoints_are_versioned(client: AsyncClient, path: str) -> None:
 # --- step 10.4: report endpoints -------------------------------------------
 
 
+@needs_pdf_backend
 @pytest.mark.parametrize("report_format", ["executive", "technical"])
 async def test_report_downloads_as_pdf(
     client: AsyncClient, tmp_path: Path, report_format: str
@@ -412,3 +423,47 @@ async def test_report_rejects_an_unknown_format(client: AsyncClient, tmp_path: P
         params={"format": "marketing"},
     )
     assert response.status_code == 422
+
+
+# --- cross-platform: the PDF backend is optional, the API is not -----------
+
+
+async def test_report_renders_html_without_the_pdf_backend(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """``?inline=1`` is pure Jinja2 and must work on a machine with no GTK,
+    which is the default state of a Windows box."""
+    run = await _analyse(client, tmp_path)
+    response = await client.get(
+        f"{API_PREFIX}/assessments/{run['assessmentId']}/report",
+        params={"format": "technical", "inline": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "<html" in response.text.lower()
+
+
+async def test_missing_pdf_backend_is_a_503_that_names_the_remedy(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing native library is not the analyst's fault and not a bug in
+    the request, so it must not surface as an opaque 500. The 503 has to carry
+    the fix, because the person reading it is the person who can apply it."""
+    run = await _analyse(client, tmp_path)
+
+    def _no_backend(*args: object, **kwargs: object) -> bytes:
+        raise PdfBackendUnavailableError(PDF_BACKEND_HINT)
+
+    monkeypatch.setattr("analyzer.api.routes.reports.render_pdf", _no_backend)
+
+    response = await client.get(f"{API_PREFIX}/assessments/{run['assessmentId']}/report")
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith(PROBLEM_CONTENT_TYPE)
+    body = response.json()
+    assert body["title"] == "Service unavailable"
+    assert body["capability"] == "pdf"
+    # The two things the reader needs: the way out now, and the way to fix it.
+    assert "?inline=1" in body["detail"]
+    assert "GTK3" in body["detail"]

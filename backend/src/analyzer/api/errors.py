@@ -82,6 +82,25 @@ class PayloadTooLargeError(ApiError):
         )
 
 
+class DependencyUnavailableError(ApiError):
+    """A capability this endpoint needs is not installed on this deployment.
+
+    Distinct from a 500: nothing went wrong with the request, and retrying it
+    unchanged will fail the same way until an operator installs something. The
+    detail therefore carries the remedy, which is safe to expose because it
+    names a package, never anything about this machine.
+    """
+
+    def __init__(self, detail: str, *, capability: str) -> None:
+        super().__init__(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            title="Service unavailable",
+            detail=detail,
+            problem_type=f"{PROBLEM_BASE_URI}/dependency-unavailable",
+            extra={"capability": capability},
+        )
+
+
 class ConflictError(ApiError):
     def __init__(self, detail: str, *, extra: dict[str, Any] | None = None) -> None:
         super().__init__(

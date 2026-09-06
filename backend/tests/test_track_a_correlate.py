@@ -2,14 +2,11 @@
 
 Also an end-to-end ``run_track_a`` test wiring a synthetic pcap (built the
 same way as the Phase 3 ingest tests, ``tests/_pcap.py``) through a fake
-tshark script (``tests/test_track_a_ike_parser.py``'s pattern) to a real
-``SecurityAssociation``.
+tshark binary (``tests/_fakebin.py``) to a real ``SecurityAssociation``.
 """
 
 from __future__ import annotations
 
-import json
-import stat
 from pathlib import Path
 
 from analyzer.core.enums import (
@@ -35,6 +32,7 @@ from analyzer.track_a.ike_parser import (
     build_negotiations,
     parse_isakmp_json,
 )
+from tests._fakebin import write_fake_tshark
 from tests._pcap import DLT_EN10MB, esp_payload, eth_frame, ipv4_packet, udp_packet, write_pcap
 from tests._tshark_json import attr, isakmp_header, packet, proposal, sa_payload, transform
 
@@ -283,13 +281,6 @@ def test_assembly_unmapped_encryption_alg_is_unavailable_not_a_guess() -> None:
 # ===========================================================================
 
 
-def _write_fake_tshark(path: Path, json_payload: list[dict]) -> Path:
-    payload = json.dumps(json_payload).replace("'", "'\\''")
-    path.write_text(f"#!/bin/sh\necho '{payload}'\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    return path
-
-
 def test_run_track_a_end_to_end(tmp_path: Path) -> None:
     pcap = tmp_path / "cap.pcap"
     # write_pcap timestamps each frame by its position in this list (whole
@@ -329,7 +320,7 @@ def test_run_track_a_end_to_end(tmp_path: Path) -> None:
             ),
         ),
     ]
-    fake_tshark = _write_fake_tshark(tmp_path / "tshark", tshark_json)
+    fake_tshark = write_fake_tshark(tmp_path / "tshark", tshark_json)
 
     (result,) = run_track_a(pcap, sa_pairs, tshark_bin=str(fake_tshark))
 

@@ -17,6 +17,81 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Fixed — cross-platform: the backend now starts on Windows
+
+Not a plan step. `uv run uvicorn analyzer.api.main:create_app --factory`
+failed outright on Windows with `OSError: cannot load library
+'libgobject-2.0-0'`, and the same import took `test_api.py`, `test_api_jobs.py`
+and `test_reports.py` down at **collection**, so a third of the suite could not
+even be enumerated. NFR-6 wants this stack runnable on an analyst's own
+machine; two thirds of that promise was Linux-only.
+
+**WeasyPrint is no longer a startup dependency** — `report/render.py`
+- WeasyPrint's cffi bindings `dlopen` Pango, Cairo and GObject at *import*
+  time, so a module-level `from weasyprint import CSS, HTML` fails on any
+  machine without a GTK stack — every stock Windows install. The traceback
+  named `libgobject-2.0-0` and read like a broken Python package, which is
+  why it did not point at the report renderer.
+- The import moved into `_weasyprint()`, called only by `render_pdf`.
+  `render_html` is Jinja2 and nothing else, so the HTML path — and therefore
+  the whole API, the pipeline, and both dashboards — no longer depends on a
+  PDF toolchain being present.
+- **Both outcomes of the probe are cached.** `functools.cache` would only have
+  memoised the success: it re-raises without storing the exception. A failed
+  import is not cached in `sys.modules` either — Python discards the half-built
+  module — so without the module-level `_PDF_BACKEND_FAILURE` sentinel, every
+  report request on a GTK-less machine re-ran the dlopen probe and re-printed
+  WeasyPrint's multi-line installation banner to stdout.
+- `pdf_backend_available()` exposes the probe for tests and callers that can
+  degrade.
+
+**A missing PDF backend is a 503, not a 500** — `api/errors.py`,
+`api/routes/reports.py`
+- New `DependencyUnavailableError`. The request was valid and the assessment
+  is readable; this deployment simply cannot render it to PDF, and retrying
+  unchanged will fail identically until an operator installs something. A 500
+  would have said "we crashed", which is both wrong and unactionable.
+- The `detail` carries the remedy per platform *and* points at `?inline=1`,
+  because the person reading the error is the person who can fix it. Safe to
+  expose: it names packages, never anything about the machine.
+
+**The fake `tshark` runs on Windows** — `tests/_fakebin.py` (new)
+- Five Track A tests wrote a `#!/bin/sh` fake and executed it. Windows
+  `CreateProcess` refuses a file with no recognised executable format, so they
+  died with `WinError 193 — %1 is not a valid Win32 application`, which says
+  nothing about shebangs.
+- The behaviour is now expressed as data (`stdout`, `stderr`, `exit_code`) and
+  rendered into whatever the platform can launch: a shebanged Python script on
+  POSIX, a `.cmd` shim beside a Python body on Windows. Python on both sides
+  rather than shell-and-batch, so there is one set of quoting rules and the
+  fake cannot drift between platforms. Step 4.1 keeps its real subprocess
+  coverage on both.
+
+**CI ordering** — `scripts/ci-local.sh`, `.github/workflows/ci.yml`
+- `next build` now runs before `tsc --noEmit`. Next 16 generates its
+  typed-route definitions under `.next/types` during a build, so on a clean
+  checkout the type check failed with ~10 phantom `PageProps` errors before
+  the build that would have satisfied it. Both files were wrong in the same
+  way; both are fixed.
+
+Verified on Windows 10: `uv run pytest` is **514 passed, 62 skipped, 0
+failed** (was 5 failed plus 3 collection errors). `uvicorn` starts,
+`/api/v1/health` returns 200, and upload → analyse → assessment → HTML report
+completes end to end. `ruff`, `ruff format` and `mypy --strict` are clean.
+
+### Not verified — cross-platform fix
+
+- **The Linux side of this change has not been re-run here.** The reasoning
+  holds on both — a lazy import cannot break an eager one, and `_fakebin.py`'s
+  POSIX branch writes the same shebanged script the old helper did — but the
+  suite was run on Windows only. CI covers Linux on the next push.
+- **The 503 path is tested by monkeypatching `render_pdf`**, plus the real
+  unpatched 503 observed against a live server on this machine. What has not
+  been observed is a Linux box that has WeasyPrint installed *correctly*
+  producing the same PDFs as before; the PDF assertions skip here rather than
+  pass.
+- **`MT-20` is new and unrun on Linux** — see `manualtesting.md`.
+
 ### Added — Phase 11, hardening (partial: 11.1–11.4 and 11.7)
 
 **11.1 Degradation suite** — `tests/test_degradation.py`

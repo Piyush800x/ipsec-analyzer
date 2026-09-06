@@ -14,10 +14,10 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request, Response
 
 from analyzer.api.deps import SessionDep
-from analyzer.api.errors import NotFoundError
+from analyzer.api.errors import DependencyUnavailableError, NotFoundError
 from analyzer.core.schema import Assessment as AssessmentDocument
 from analyzer.db import models
-from analyzer.report.render import render_html, render_pdf
+from analyzer.report.render import PdfBackendUnavailableError, render_html, render_pdf
 
 router = APIRouter(prefix="/assessments", tags=["reports"])
 
@@ -49,7 +49,14 @@ async def get_report(
             render_html(document, report_format, rule_count=rule_count), media_type="text/html"
         )
 
-    pdf = render_pdf(document, report_format, rule_count=rule_count)
+    try:
+        pdf = render_pdf(document, report_format, rule_count=rule_count)
+    except PdfBackendUnavailableError as exc:
+        # A 503 rather than a 500: the request is fine and the assessment is
+        # readable, this deployment just cannot turn it into a PDF. The HTML
+        # the analyst actually wants is one query parameter away, so say so.
+        raise DependencyUnavailableError(str(exc), capability="pdf") from exc
+
     filename = f"ipsec-{report_format}-{assessment_id}.pdf"
     return Response(
         pdf,

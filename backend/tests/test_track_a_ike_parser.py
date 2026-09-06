@@ -10,7 +10,6 @@ path is genuinely covered even without the real binary.
 from __future__ import annotations
 
 import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -31,6 +30,7 @@ from analyzer.track_a.ike_parser import (
     parse_isakmp_json,
     run_tshark,
 )
+from tests._fakebin import write_fake_binary
 from tests._tshark_json import attr, isakmp_header, notify, packet, proposal, sa_payload, transform
 
 IKE_SA_INIT = 34
@@ -40,14 +40,8 @@ IKE_SA_INIT = 34
 # ===========================================================================
 
 
-def _write_fake_tshark(path: Path, script: str) -> Path:
-    path.write_text(f"#!/bin/sh\n{script}\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    return path
-
-
 def test_run_tshark_parses_stdout_json(tmp_path: Path) -> None:
-    fake = _write_fake_tshark(tmp_path / "tshark", "echo '[{\"ok\": true}]'")
+    fake = write_fake_binary(tmp_path / "tshark", stdout='[{"ok": true}]\n')
     pcap = tmp_path / "cap.pcap"
     pcap.write_bytes(b"")
 
@@ -62,7 +56,7 @@ def test_run_tshark_missing_binary_raises() -> None:
 
 
 def test_run_tshark_nonzero_exit_raises(tmp_path: Path) -> None:
-    fake = _write_fake_tshark(tmp_path / "tshark", "echo 'bad file' >&2; exit 1")
+    fake = write_fake_binary(tmp_path / "tshark", stderr="bad file\n", exit_code=1)
     pcap = tmp_path / "cap.pcap"
     pcap.write_bytes(b"")
 
@@ -71,7 +65,7 @@ def test_run_tshark_nonzero_exit_raises(tmp_path: Path) -> None:
 
 
 def test_run_tshark_malformed_json_raises(tmp_path: Path) -> None:
-    fake = _write_fake_tshark(tmp_path / "tshark", "echo 'not json at all {'")
+    fake = write_fake_binary(tmp_path / "tshark", stdout="not json at all {\n")
     pcap = tmp_path / "cap.pcap"
     pcap.write_bytes(b"")
 
@@ -80,7 +74,7 @@ def test_run_tshark_malformed_json_raises(tmp_path: Path) -> None:
 
 
 def test_run_tshark_empty_output_is_empty_list(tmp_path: Path) -> None:
-    fake = _write_fake_tshark(tmp_path / "tshark", "true")
+    fake = write_fake_binary(tmp_path / "tshark")
     pcap = tmp_path / "cap.pcap"
     pcap.write_bytes(b"")
 
