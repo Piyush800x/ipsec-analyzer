@@ -9,10 +9,12 @@ feature extractor, and the service that must degrade honestly without a model.
 from __future__ import annotations
 
 import math
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from analyzer.core.enums import Provenance
+from analyzer.core.enums import EncryptionAlg, IntegrityAlg, Provenance
 from analyzer.core.schema import CaptureQuality
 from analyzer.ingest.flow import Flow, SAPair
 from analyzer.ingest.reader import FlowKey, PacketRecord
@@ -350,10 +352,142 @@ def test_service_still_runs_the_deterministic_analyses() -> None:
 
     result = InferenceService().analyse(pair, _quality())
 
-    assert result.encryption_alg_family.provenance is Provenance.INFERRED
+    assert result.encryption_alg.provenance is Provenance.INFERRED
+    assert result.encryption_alg.value is EncryptionAlg.AES_CBC
     assert result.replay_sane.provenance is Provenance.INFERRED
 
 
 def test_service_reports_no_model_versions() -> None:
     """The correct state for a Track A-only assessment, per the contract."""
     assert InferenceService().model_versions == {}
+
+
+# --- the gap that let a suite label reach an enum-typed field --------------
+
+
+def test_sieve_output_survives_assessment_validation(tmp_path: Path) -> None:
+    """A *successful* sieve must produce a document the contract accepts.
+
+    This is the regression test for a defect the rest of the suite could not
+    catch. Every other cipher-sieve test asserts on the ``Attribute`` the sieve
+    returns, and every degradation test drives a capture where the sieve
+    refuses -- so nothing ever carried a successful inference through
+    ``SecurityAssociation`` into ``Assessment``. ``model_copy(update=...)`` does
+    not validate, so writing the suite label ``"AES-CBC + HMAC-SHA256-128"``
+    into ``encryption_alg`` (an ``EncryptionAlg`` field) built a plausible
+    object and blew up several layers later, when the API validated the
+    finished assessment and returned a 500 to the dashboard.
+
+    The capture below clears both lattice gates -- 200+ packets and 8+ distinct
+    ESP payload lengths -- which is the specific path that was untested.
+    """
+    from analyzer.api.pipeline import analyse_capture
+    from analyzer.assess.engine import AssessmentEngine
+    from analyzer.assess.policy import load_policy
+    from analyzer.core.ids import new_id
+    from tests._pcap import DLT_EN10MB, esp_payload, eth_frame, ipv4_packet, write_pcap
+
+    policy = Path(__file__).resolve().parents[1] / "src/analyzer/assess/policies/baseline.yaml"
+    pcap = tmp_path / "diverse.pcap"
+    write_pcap(
+        pcap,
+        DLT_EN10MB,
+        [
+            eth_frame(
+                ipv4_packet(
+                    "10.0.0.1", "10.0.0.2", 50, esp_payload(1, i, b"X" * (48 + (i % 13) * 16))
+                )
+            )
+            for i in range(1, 150)
+        ]
+        + [
+            eth_frame(
+                ipv4_packet(
+                    "10.0.0.2", "10.0.0.1", 50, esp_payload(2, i, b"Y" * (48 + (i % 11) * 16))
+                )
+            )
+            for i in range(1, 150)
+        ],
+    )
+
+    document = analyse_capture(
+        pcap,
+        AssessmentEngine(load_policy(policy)),
+        capture_id=new_id(),
+        engine_version="test",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    assert document.capture_quality.sufficient_for_lattice is True
+    sa = document.security_associations[0]
+    assert sa.encryption_alg.provenance is Provenance.INFERRED
+    assert isinstance(sa.encryption_alg.value, EncryptionAlg)
+    assert sa.encryption_alg.confidence is not None
+    # FR-4.9: identifying the family says nothing about the AES key length.
+    assert sa.encryption_keylen.provenance is Provenance.UNAVAILABLE
+
+
+def test_confidence_counts_distinct_answers_not_survivors() -> None:
+    """Each field's confidence measures *that field*, not the survivor count.
+
+    Lengths starting at 28 in steps of 4 leave four suites standing --
+    AES-GCM-16, AES-GCM-8, AES-CTR + HMAC-SHA1-96, ChaCha20-Poly1305 -- which
+    name four different ciphers but only two integrity algorithms, because
+    three of them are AEAD and take ``none``. So the same evidence pins the
+    integrity algorithm down harder than the cipher, and the two confidences
+    must differ accordingly. Scoring both off ``len(survivors)`` would have
+    reported one number for two different degrees of certainty.
+    """
+    lengths = [28 + 4 * i for i in range(12)]
+    quality = _quality()
+
+    matching = cipher_family.survivors(lengths)
+    assert len({c.encryption_alg for c in matching}) == 4
+    assert len({c.integrity_alg for c in matching}) == 2
+
+    encryption = cipher_family.detect_encryption(lengths, quality)
+    integrity = cipher_family.detect_integrity(lengths, quality)
+
+    assert encryption.confidence is not None
+    assert integrity.confidence is not None
+    # Two integrity answers out of the 4 the candidate set can produce beats
+    # four cipher answers out of 6.
+    assert integrity.confidence > encryption.confidence
+
+
+def test_a_single_surviving_suite_is_certain_about_both_fields() -> None:
+    """The other end of the same formula: one survivor, nothing left to doubt."""
+    lengths = [20 + 4 * i for i in range(12)]
+    quality = _quality()
+
+    assert len(cipher_family.survivors(lengths)) == 1
+
+    encryption = cipher_family.detect_encryption(lengths, quality)
+    integrity = cipher_family.detect_integrity(lengths, quality)
+
+    assert encryption.value is EncryptionAlg.AES_GCM_8
+    assert integrity.value is IntegrityAlg.NONE
+    assert encryption.confidence == pytest.approx(1.0)
+    assert integrity.confidence == pytest.approx(1.0)
+
+
+def test_suite_label_is_not_a_contract_value() -> None:
+    """``detect`` returns display prose; it must never reach an enum field.
+
+    Guards the shape of the original defect rather than one instance of it.
+    """
+    lengths = [20 + 4 * i for i in range(12)]
+    label = cipher_family.detect(lengths, _quality()).value
+
+    assert label == "AES-GCM-8"
+    assert label not in set(EncryptionAlg)
+
+
+def test_sieve_never_offers_a_candidate_carrying_a_key_length() -> None:
+    """FR-4.9. AES-128 and AES-256 pad identically, so no amount of length
+    diversity distinguishes them and no candidate may imply it does."""
+    assert EncryptionAlg.AES_CBC in {c.encryption_alg for c in cipher_family.CANDIDATES}
+    assert not any(
+        "128" in c.encryption_alg.value or "256" in c.encryption_alg.value
+        for c in cipher_family.CANDIDATES
+    )

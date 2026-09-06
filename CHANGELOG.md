@@ -17,6 +17,177 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Added — step 8.5, ISCXVPN2016 ingestion
+
+`analyzer.dataset.iscx` maps the University of New Brunswick's ISCXVPN2016
+captures into the feature format `track_b.features` produces for testbed
+captures, so step 9.12 can evaluate a classifier on traffic this project did
+not generate.
+
+**Done when — external captures produce feature vectors with the same schema as
+testbed captures.** Demonstrated: an adapted external capture and a testbed ESP
+capture both yield **74 columns**, and the comparison is set equality on the
+names, not on the count.
+
+```
+external columns : 74
+testbed columns  : 74
+schemas identical: True
+comparable subset: 55 of 74
+```
+
+- `label_for()` reads ISCXVPN2016's filename convention into PRD §9.2's seven
+  classes. The mapping is **partial on purpose**: `tor_*` and unrecognised
+  names return `None` and are reported as unmapped rather than forced into the
+  nearest bucket, which would inject label noise into the one evaluation whose
+  purpose is to be trusted. Pattern order is load-bearing and tested —
+  `skype_file` must reach file transfer, not the VoIP rule that also matches
+  `skype`.
+- `adapt_directory()` returns `unmapped`, `empty` and `unreadable` alongside
+  the flows, each with its reason. A batch that silently dropped what it could
+  not handle would overstate its own coverage, and coverage is the point of an
+  external set. ISCXVPN2016 ships some captures as pcapng, which `read_packets`
+  refuses; those land in `unreadable` with the reader's message.
+- `comparable_feature_names()` removes the 19 ESP-geometry features
+  (`esp_len_mod16_*`, `esp_len_modal*`, `esp_len_distinct`), leaving 55.
+
+**The honest part, and the reason to read the module docstring before trusting
+any number from it.** ISCXVPN2016 is not IPsec — its "VPN" captures are
+OpenVPN over UDP and the rest is plaintext. There is no ESP header, so there is
+no SPI to key a flow on and no `esp_payload_len` to measure. Two substitutions
+bridge that, and both change what the numbers mean:
+
+1. Flows are keyed on the **address pair**, with `_synthetic_spi()` filling
+   `FlowKey.spi` from a stable non-cryptographic digest. It is not an SPI and
+   is never reported as one. It is deterministic rather than `hash()`-based,
+   because a row identity that changed between runs would make a feature matrix
+   impossible to trace back to its capture.
+2. `ip_payload_len` stands in for `esp_payload_len`. These are different
+   measurements — the ESP figure is `IV || ciphertext || ICV` and nothing more.
+   Without the substitution every external vector would carry all-zero geometry,
+   which reads as a *perfectly padded tunnel* rather than an unmeasured one.
+   That is a silent wrong answer of exactly the kind this project exists to
+   avoid, so it is tested against.
+
+Substitution 2 is why the geometry features do not transfer: they measure a
+padding rule these captures do not have, and a cross-corpus score computed over
+them would look like generalisation and be an artefact. The timing, flow and
+directionality groups do transfer — they describe application behaviour, which
+is what the classifier is meant to be reading.
+
+`ExternalFlow.tunnelled` keeps the `vpn_` half separate from the plaintext
+half. A classifier trained on IPsec should do better on OpenVPN than on
+plaintext; if it does not, that is a finding rather than a detail.
+
+26 tests, on synthetic captures shaped like ISCXVPN2016's. The real corpus needs
+a registration form and several gigabytes; the adapter's contract does not.
+
+### Not verified — step 8.5
+
+- **No real ISCXVPN2016 capture has been adapted.** The corpus was not
+  downloaded. The filename patterns are written from the published naming
+  convention, not from a directory listing, so a distribution that names files
+  differently will land in `unmapped` — visibly, which is the intended failure
+  mode, but it will need the patterns extended.
+- **The proportion of the corpus that is pcapng is unknown**, so how much of it
+  `read_packets` will refuse outright is unknown. `unreadable` reports it; no
+  one has read that report.
+- **Step 9.12 itself is not done.** This is the adapter it depends on, not the
+  evaluation. There is no model to evaluate.
+
+### Fixed — Track B wrote a cipher *suite* label into an enum-typed field
+
+Not a plan step; found by running a real capture through the running API rather
+than through the test suite. Every analysis whose capture had enough ESP length
+diversity for the sieve to answer failed with **HTTP 500**:
+
+```
+2 validation errors for Assessment
+security_associations.0.encryption_alg.value
+  Input should be 'null', 'des-cbc', '3des-cbc', 'aes-cbc', ...
+  [type=enum, input_value='AES-CBC + HMAC-SHA256-128', input_type=str]
+```
+
+`cipher_family.detect()` returns a human-readable suite name — encryption and
+integrity joined into one string — and `InferenceService.apply()` assigned it
+straight to `SecurityAssociation.encryption_alg`, which the contract types as
+`Attribute[EncryptionAlg]`. `model_copy(update=...)` performs no validation, so
+the bad object was built happily and detonated one layer later, when the
+finished `Assessment` was validated.
+
+**Why the whole suite missed it.** Every cipher-sieve test asserted on the
+`Attribute` the sieve returns, and every degradation test drives a capture where
+the sieve *refuses* — an ESP-only capture, a truncated one, a single-length one.
+Nothing carried a **successful** inference through `SecurityAssociation` into
+`Assessment`. The one path that mattered in production was the one path with no
+end-to-end coverage.
+
+The fix does more than cast the value:
+
+- `CipherCandidate` now carries `encryption_alg: EncryptionAlg` and
+  `integrity_alg: IntegrityAlg` alongside its display `name`. The contract
+  stores those as two separate fields and the sieve now answers them separately.
+- `detect_encryption()` and `detect_integrity()` produce the enum-typed
+  attributes. `detect()` is retained, documented as *display prose only*, and a
+  test asserts its output is not a member of `EncryptionAlg`.
+- **Confidence is now computed per field**, counting distinct values of *that*
+  field among the survivors rather than the survivor count. This is a real
+  gain, not bookkeeping: lengths congruent to 28 mod 4 leave four suites
+  standing that name four ciphers but only two integrity algorithms — three
+  are AEAD and take `none` — so the same evidence pins integrity down harder
+  than the cipher, and the two confidences now say so. `confidence_for()` and
+  LLD §7.2's ranking are unchanged for the suite label.
+- `detect()`, `detect_encryption()` and `detect_integrity()` share one `_sieve()`
+  gate, so they cannot drift into disagreeing about whether a capture was usable.
+- `apply()` fills `integrity_alg` as well, and only where Track A left the field
+  unavailable. An inference still never overwrites a parsed fact.
+
+Five regression tests, including one that drives a lattice-sufficient capture
+through `analyse_capture()` into a validated `Assessment` — the coverage gap
+itself, closed.
+
+An interim version of the fix refused to answer whenever survivors disagreed.
+That was wrong: it discarded LLD §7.2's ranking-plus-confidence design and made
+step 9.2's **Done when** unreachable. Ambiguity belongs in the confidence.
+
+### Verified — the API end to end, against a running server
+
+`uvicorn analyzer.api.main:create_app --factory` → upload → analyze → poll →
+assessment → both PDFs, on SQLite, with a 78 KB 398-packet ESP-only capture:
+
+| Step | Result |
+|---|---|
+| `GET /api/v1/health` | `{"status":"ok","database":"up","version":"0.1.0"}` |
+| `POST /api/v1/captures` | 201, UUIDv7 id |
+| `POST /api/v1/captures/{id}/analyze` | run id, `status: queued` |
+| `GET /api/v1/runs/{id}` | reaches `succeeded`, `assessmentId` populated |
+| `GET /api/v1/assessments/{id}` | score 100 `strong` — nothing proven wrong |
+| `?format=executive` | 200, `application/pdf`, 12,918 bytes |
+| `?format=technical` | 200, `application/pdf`, 32,042 bytes |
+| unknown id | `application/problem+json`, RFC 9457 shape |
+
+Recorded as MT-21. This is what found the defect above, and it also
+closed MT-20's outstanding Linux column.
+
+### Deviations from the specs — API key casing
+
+**The `Assessment` document is served in `snake_case`, not `camelCase`.**
+[CLAUDE.md](CLAUDE.md) says conversion to camelCase happens at the API boundary
+via Pydantic aliases, and the *envelope* types do exactly that — `runId`,
+`captureId`, `assessmentId`. The assessment document itself does not:
+`GET /api/v1/assessments/{id}` returns `security_associations`,
+`capture_quality`, `model_versions`.
+
+This is deliberate and consistent from end to end — the generated
+`frontend/src/lib/types.ts`, the fixture files and the report templates all use
+snake_case for the document — but it *is* a divergence from the stated rule and
+was not previously written down. The reason to keep it: the document is stored
+verbatim as JSON and served verbatim, which is what makes NFR-4's
+byte-identical guarantee checkable against what the API actually returns.
+Re-casing on the way out would put a transformation between the determinism
+test and the wire. Whoever wants one convention everywhere should change
+CLAUDE.md or the storage format, not add a re-caser to the read path.
+
 ### Fixed — cross-platform: the backend now starts on Windows
 
 Not a plan step. `uv run uvicorn analyzer.api.main:create_app --factory`
