@@ -17,6 +17,726 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Added — Phase 11, hardening (partial: 11.1–11.4 and 11.7)
+
+**11.1 Degradation suite** — `tests/test_degradation.py`
+The step the plan says is "most likely to be dropped under time pressure and
+the one most likely to save the demo". All five degraded inputs pass, and each
+assertion checks two things — that the value is absent *and* that the reason is
+present, because an UNAVAILABLE with an empty note passes a weaker test and
+fails a real analyst:
+- **ESP only** — no IKE anywhere. `encryption_keylen` comes back unavailable,
+  which is FR-4.9 made executable, and the pipeline still produces a complete
+  assessment rather than erroring.
+- **Truncated** — `tcpdump -s 96`. The cipher sieve refuses rather than
+  sieving on the snaplen.
+- **Single-length** — the VoIP case that is guaranteed to appear in the PRD
+  §16 demo. One distinct length is not diversity, and the detector says so.
+- **One-directional** — a legitimate analyst situation, not an error: one
+  flagged unpaired SA, no fabricated responder SPI.
+- **IKE mid-stream** — `has_ike` true, `ike_complete` false, and Track A does
+  not treat the former as the latter.
+- Plus a **control**: given a complete capture, Track A must actually observe
+  something. Without it the whole suite would pass by reporting UNAVAILABLE
+  for everything always.
+
+**11.2 DB portability** — the full API suite now runs on SQLite *and*
+PostgreSQL, not just the model layer. An endpoint that works on one and not the
+other is exactly the failure a model-only test survives. The Postgres half
+skips locally and runs in CI, which already provisions the service.
+
+**11.3 Performance** — `tests/test_performance.py`. A 100 MB, 171,901-packet
+capture analyses in **1.67 s** against NFR-1's 60-second budget. See Not
+verified for what that number excludes.
+
+**11.4 Offline stack** — `docker-compose.offline.yml`, plus the frontend
+Dockerfile and the backend Dockerfile's API entrypoint.
+- The backing network is `internal: true`, so Docker creates no gateway off
+  the box for it. The backend publishes **no port at all** and is reachable
+  only through the frontend's proxy route. NFR-6 becomes a property of the
+  topology rather than a promise about the code.
+- The backend image gained Pango, Cairo and the DejaVu fonts (WeasyPrint fails
+  at import without them, with an error that reads like a Python problem and is
+  not) and `alembic.ini`, which the compose file's migration step needs.
+
+**11.7 Documentation** — README now states Gate G3 and, in the same breath,
+says plainly that no model has been trained and that tshark's field names are
+unverified. `manualtesting.md` gains MT-17 (both reports read correctly to
+their audience — run and passed), MT-18 (offline stack, not run) and MT-19
+(demo rehearsal, not run).
+
+### Not verified — Phase 11
+
+- **The 1.67 s figure excludes Track A.** tshark is not installed here, so that
+  stage raised and was skipped; the measurement is ingest + Track B + assess.
+  tshark over a 100 MB capture is not free and the number will move. NFR-1 is
+  met with room to spare, but not yet on the whole pipeline.
+- **The offline stack has never been started** (MT-18). Both Dockerfiles are
+  written and the frontend's standalone build is verified, but `docker compose
+  up` has not run, so the `internal: true` isolation is a claim about the file
+  rather than an observed result.
+- **Step 11.5 (demo captures) and 11.6 (rehearsal) were not performed.** 11.5
+  needs the testbed to generate the two PRD §16 captures; 11.6 needs 11.5 and
+  a running offline stack. Both are Docker-blocked.
+- **Step 11.8 (demonstration video) was not produced.** It needs a rehearsed
+  demo to record.
+
+### Added — Phase 10, reports
+
+Implementation-plan steps 10.1–10.4. Fully verified: both formats render to
+real PDFs from the step 1.4 fixtures.
+
+**10.1 Template scaffolding** — Jinja2 plus WeasyPrint, `report/templates/`
+- Print styling rather than screen styling: A4, real margins, running headers,
+  page numbers, `break-inside: avoid` on findings so one never splits across a
+  page boundary.
+- Rendering takes an `Assessment` and nothing else — no database, no network —
+  so a report is reproducible from its stored document alone, years later,
+  without the capture or the policy file that produced it.
+
+**10.2 Executive report** — two pages, business language
+- Leads every finding with its consequence, not its mechanism. **No hex and no
+  packet indices**, asserted directly against the fixture's own SPI and
+  evidence-method strings.
+- Says explicitly that nothing was guessed to fill a gap, and explains why
+  metadata exposure does not improve when the cryptography does.
+
+**10.3 Technical report** — every finding with its evidence
+- Full parameter table with provenance per row; an unavailable value renders
+  as its **reason**, matching the dashboard's `AttributeCell` rather than
+  diverging from it.
+- Carries PRD §7's capability matrix — including the rows that say "not
+  determinable", which is the point of printing it — and a limitations section
+  stating the AES key-length case explicitly, plus the anti-replay window and
+  the sequence-gap distinction from LLD §7.5.
+- When no model ran, the report says so rather than letting a reader assume
+  one did.
+
+**10.4 Report endpoints** — `GET /assessments/{id}/report?format=…`
+- Streams `application/pdf` with a filename. The query parameter is `format`
+  because LLD §9 specifies that wire name; the Python parameter is aliased so
+  it does not shadow the builtin.
+- `?inline=1` returns the HTML, which is what you want when iterating on a
+  template — the PDF renderer is the slow part and the HTML is what changed.
+
+### Added — Phase 9, Track B (partial: the deterministic half)
+
+**Steps 9.6–9.10 and 9.12 were not performed.** Every one of them trains or
+evaluates a model on the Phase 8 dataset, which needs Docker and does not
+exist. No model was faked, no accuracy number was invented, and no
+`models/` artefact was committed.
+
+What *did* land is everything in Track B that needs no training data — which
+includes the step the plan marks "never cut".
+
+**9.2 Cipher family detector** — `track_b/cipher_family.py`
+- LLD §7.2's congruence sieve over the eight candidate suites. A **single**
+  counterexample eliminates a candidate: this is a sieve, not a vote, so 399
+  agreeing packets do not outvote one that disagrees (asserted).
+- Survivors are ranked by constraint strength — a 16-byte block survived a
+  stricter test than a 4-byte one on the same evidence — and the **full
+  survivor set** goes into the evidence, not just the winner.
+- **The refusals are the point.** Truncated capture, insufficient length
+  diversity, or no surviving candidate all return UNAVAILABLE with the reason.
+  AES-GCM-16 and ChaCha20-Poly1305 have *identical* geometry, so a GCM capture
+  correctly reports two survivors and a confidence below 1.0 rather than
+  picking one and sounding certain.
+
+**9.3 Replay and lifetime** — `track_b/replay.py`
+- `replay_sane` means "sequence numbers behave correctly on the wire", not
+  "anti-replay is enabled", and the note says so. Gaps are counted and
+  explicitly **not** called an attack — capture drops and reordering
+  middleboxes produce the same pattern.
+- `anti_replay_window_size()` takes no arguments and always returns
+  UNAVAILABLE. There is no input that could change the answer: the window is a
+  receiver-side local setting that is never transmitted (LLD §7.5).
+
+**9.4 PFS inference** — `track_b/pfs.py`
+- `CREATE_CHILD_SA` size delta against the group's KE payload size. MODP
+  groups get 0.9 confidence; **ECP groups get 0.65**, because a 64-byte delta
+  overlaps ordinary traffic-selector variation and a flat confidence there
+  would invite exactly the misplaced trust PRD §8.3 warns about.
+
+**9.1 Feature extractor** — `track_b/features.py`
+- Every feature group from LLD §7.1 in Polars, plus the 128-value signed
+  sequence for the CNN. No NaNs and no infinities on short flows,
+  single-packet flows, or one-directional captures — all asserted.
+
+**9.11 Inference service** — `track_b/service.py`, wired into `api/pipeline.py`
+- Runs the deterministic analyses for real and reports UNAVAILABLE **with the
+  reason** for the model-backed ones. The seam is the finished shape: when
+  models arrive, nothing downstream changes — the pipeline stage, the
+  attribute types, the dashboard cell and the policy's confidence guards are
+  all already correct.
+- Track A's observations are never overwritten by an inference. The cipher
+  sieve only speaks where Track A could not, which is the ESP-only case.
+
+### Fixed — Phase 9
+
+- **A non-determinism bug in the feature extractor**, caught by its own test.
+  `Series.mode()` returns ties in arbitrary order, and when every packet
+  length is distinct *every* value is a mode — so `esp_len_modal` differed
+  between two runs over identical input. That would have broken NFR-4 and, far
+  worse, put a column that changes run-to-run into a training matrix.
+
+### Not verified — Phase 9
+
+- **No model has been trained or evaluated.** Steps 9.6 (LightGBM baseline),
+  9.7 (CNN, macro-F1 ≥ 0.85), 9.8 (calibration, ECE ≤ 0.10), 9.9 (mode
+  classifier), 9.10 (SHAP) and 9.12 (ISCXVPN2016 validation) all require the
+  Phase 8 dataset. PRD §8.4's targets are therefore unmet and unmeasured — not
+  missed, unmeasured.
+- **The sieve has never seen a real ESP capture.** Its candidate geometry is
+  RFC-derived and its tests construct lengths from that same table, so they
+  prove the sieve implements the rule, not that real strongSwan traffic obeys
+  it. The Phase 2 spike (CHANGELOG above) did confirm the premise on 60 real
+  packets, which is the closest thing to independent evidence available here.
+- **PFS inference has no real `CREATE_CHILD_SA` sizes to work from**, because
+  Track A does not yet extract exchange sizes; `service.analyse` passes empty
+  lists, so PFS reports UNAVAILABLE in the live pipeline today. The inference
+  itself is tested against constructed sizes.
+
+### Added — Phase 8, dataset generation (partial: 8.2 and 8.4 only)
+
+**Steps 8.1 and 8.3 were not performed.** Both generate sessions with real
+tunnels and need a Docker daemon plus a kernel with XFRM; neither was
+available. Nothing was faked to stand in for them — `dataset/sessions/` does
+not exist, and `dataset/dataset.md` says so in its second paragraph rather
+than describing data that is not there.
+
+**8.2 Label verification harness** — `testbed/verify.py`
+- `python -m testbed.verify <batch-dir>` compares Track A's output against
+  every `labels.json` in a batch.
+- **The classification rule is the whole point of this step**, and a strict
+  equality check would have been actively harmful. Six outcomes, of which only
+  two fail:
+  - `match` — observed and equal.
+  - `honest_gap` — ground truth's `not_observable_from_ike` says no parser can
+    recover this field, and Track A said `UNAVAILABLE`. A **pass**. Without
+    this, the easiest way to turn the harness green would be to teach the
+    parser to guess.
+  - `inferred` — reported as an inference. Not scored either way. This is the
+    resolution of **Phase 4's open spec question**: the matrix runs IKE on CBC
+    while ESP carries AEAD, so Track A's same-family inference is *expected* to
+    diverge on every GCM row, and counting that as a failure would mean the
+    harness only passes if Track A lies.
+  - `mismatch` — observed and wrong. A real parser bug.
+  - `fabricated` — a value reported where ground truth says the field is not
+    observable. **The most serious outcome the harness can produce**, worse
+    than a mismatch, because it is a guess the report would present as a fact.
+  - `not_reported` — unavailable where ground truth expects a value; a parser
+    that gave up, which is not the same as a field that cannot be read.
+- 11 tests over constructed ground truth and constructed parser output. One of
+  them caught a wrong lifetime in its own fixture on first run, which is the
+  behaviour being asked for.
+
+**8.4 Dataset documentation** — `dataset/dataset.md`
+- Schema, generation procedure, the three-block `labels.json` contract, the
+  pinned tool versions and why they must not drift, licence and provenance
+  (synthetic throughout; no real traffic, no personal data), and the DVC
+  layout.
+
+### Not verified — Phase 8
+
+- **Steps 8.1 (20-session pilot) and 8.3 (≥200 sessions) have not been run.**
+  They need Docker. The harness that would grade them exists and is tested;
+  what it has never seen is a real capture.
+- **DVC is documented but not initialised.** `dataset/sessions.dvc` and a
+  configured remote both belong to a run that has not happened; creating them
+  empty would be scaffolding pretending to be a dataset.
+- **Step 8.5 (ISCXVPN2016 adapter) is deferred to Phase 9**, where the feature
+  extractor it must map onto (step 9.1) is defined. Building an adapter to a
+  schema that does not exist yet would be guesswork.
+
+### Added — Phase 7, frontend
+
+Implementation-plan steps 7.1–7.12. Next.js 16 with the App Router, built
+against the step 1.4 fixtures throughout — every view below was verified
+rendering with the backend process not running at all.
+
+**7.1–7.3 Scaffold, proxy, and the fixture-backed data layer**
+- `app/api/[...path]/route.ts` forwards to the backend with `runtime = "nodejs"`
+  and streams SSE straight through: hop-by-hop headers are stripped per RFC
+  9110 §7.6.1, and `x-accel-buffering: no` is set on event streams, because
+  anything that buffers turns a live progress bar into a jump from 0 to 100.
+- `USE_FIXTURES=1` serves every read from the two fixtures, including a
+  locally-computed comparison. **Verified**: the whole dashboard renders with
+  the API offline.
+
+**7.4 AttributeCell** — the most important component in the product
+- Three renderings at three visual weights. Observed is plain and undecorated;
+  inferred carries a confidence bar (coloured by band) plus the note and
+  evidence; **unavailable renders the reason in prose**. Verified on the weak
+  fixture's configuration view: 8 unavailable attributes, each showing its
+  actual explanation ("IKEv1 does not negotiate a PRF as a separate
+  transform…"), and not one dash.
+
+**7.5, 7.6 Upload and live progress**
+- Upload uses `XMLHttpRequest`, not `fetch`, because `fetch` has no upload
+  progress event and a 2 GB PCAP behind a motionless spinner is
+  indistinguishable from a hang.
+- `RunProgress` consumes the SSE stream with `EventSource` and shows the full
+  stage list, not just completed stages — a bar that hides what has not
+  started yet also hides where a stalled run is stalled.
+
+**7.7–7.9 Assessment layout, overview, configuration, findings**
+- Score header with the rating, metadata exposure (labelled as inverted,
+  because it is), severity breakdown, category penalty attribution, and
+  capture quality including whether the cipher-family sieve could run at all.
+- Findings filter and sort client-side; NFR-2 budgets 200 ms for a view change
+  and a round trip per click does not fit in it.
+
+**7.10–7.12 Traffic, threats, comparison**
+- The traffic timeline gives each label its own series so the 50%-overlapping
+  prediction windows render without collision, and says in the caption that
+  the confidence *is* the leakage measurement.
+- The threat grid links each ATT&CK technique through to its contributing
+  findings.
+- The comparison view renders the weak/hardened pair side by side — 15 vs 90,
+  with changed rows highlighted and provenance shown next to each value.
+
+### Added — Phase 6, API and jobs
+
+Implementation-plan steps 6.1–6.8. Also fully verified: every endpoint is
+driven over ASGI against a real SQLite database in the test suite.
+
+**6.1 FastAPI skeleton** — `api/main.py`, `api/deps.py`
+- `create_app()` builds everything onto `app.state`, so a test stands the whole
+  API up against a throwaway database without patching a module global.
+- `/api/v1/health` reports `degraded` with a 200 rather than a 503 when the
+  database is unreachable. A 503 reads to a load balancer as "take this
+  instance out", which is the wrong response to a Neon endpoint that is merely
+  cold.
+
+**6.2 Problem Details** — `api/errors.py`
+- Every error shape FastAPI can produce — `ApiError`, Starlette's
+  `HTTPException`, request validation, and anything unhandled — is routed
+  through one `problem_response`. The unhandled case is deliberately opaque:
+  an exception message can carry a connection string, and NFR-6 keeps analyst
+  data local, error text included.
+
+**6.3, 6.4 Upload and CRUD** — `api/routes/captures.py`
+- Streams to a staged temp file in 8 MB chunks, hashing as it goes; the size
+  cap and the magic-byte check both apply before anything reaches its final
+  path, so a rejected upload leaves nothing behind (asserted).
+- Re-uploading identical bytes returns the existing capture rather than a 409:
+  an analyst re-uploading a capture they already have wants the row they own.
+- Delete removes the row *and* the stored PCAP.
+
+**6.5 Pipeline orchestrator** — `api/pipeline.py`
+- ingest → Track A → Track B (stub) → assess → persist. Track A failing —
+  no IKE in the capture, or no tshark on the host — is a *degraded* analysis,
+  not a failed one: every IKE-derived attribute becomes UNAVAILABLE with a
+  reason and the run still produces an assessment.
+- Persistence writes the document and its denormalised `findings` and
+  `security_associations` rows in one transaction.
+
+**6.6 Background jobs and SSE** — `api/jobs.py`, `api/routes/runs.py`
+- `asyncio.Semaphore` bounds concurrency; the CPU stages run in a
+  `ProcessPoolExecutor`. The SSE stream matches LLD §9's wire format exactly.
+- The event bus **replays history to a late subscriber**. Without it a
+  dashboard that opens the stream a moment after POSTing misses the first
+  stage, and a run that finished before anyone subscribed streams nothing.
+
+**6.7 Assessment endpoints** — `api/routes/assessments.py`
+- Findings are served from the relational table with real SQL filtering and
+  ordering; the document endpoint returns the stored mapping as-is rather than
+  round-tripping it through Pydantic, so a later contract change cannot
+  silently rewrite an assessment that was already issued.
+- `/assessments/compare` diffs scores, finding sets, and every
+  provenance-carrying attribute — the backbone of the step 7.12 view.
+
+**6.8 OpenAPI type generation** — `scripts/gen-types.sh`
+- Dumps the schema without starting a server and runs `openapi-typescript`
+  into `frontend/src/types/generated.ts`. `--check` mode is wired into
+  `ci-local.sh`, so a Pydantic change the frontend has not absorbed fails the
+  build.
+
+**Testing**
+- 27 new tests covering every endpoint, both error paths, the semaphore bound,
+  the event bus, and the real process-pool path.
+
+### Fixed — Phase 6
+
+- **`Assessment` could not cross a process boundary.** `Attribute[T]` is a
+  *parametrised* generic Pydantic model, and a parametrised generic has no
+  importable module-level name, so `Attribute[IkeVersion]` is unpicklable and
+  the whole document with it. LLD §9's `ProcessPoolExecutor` requirement was
+  therefore unimplementable as written. The worker now returns
+  `model_dump_json()` and the parent re-validates — JSON is the form the
+  document is stored in anyway. Found by actually running the pool path rather
+  than by reading it.
+- **`JobRunner.aclose()` did not await the runs it cancelled**, so a cancelled
+  run's failure-marking path could touch an engine the caller had already
+  disposed. It now gathers them.
+- **The analyze handler held a SQLite write lock across its own response.**
+  The background job's first write is `_mark_running`, which blocked behind the
+  request's still-open transaction until the request finished. The handler now
+  commits before submitting, and `get_session` checks `in_transaction()` rather
+  than assuming it still owns one.
+
+### Added — Phase 5, assessment engine
+
+Implementation-plan steps 5.1–5.9. Unlike Phases 3 and 4, **this phase is
+fully verified**: the engine is a pure function of fixture input (LLD §8.2),
+so nothing here needed Docker, tshark, or a capture.
+
+**5.1, 5.2 Policy schema, loader and confidence guard** — `assess/policy.py`
+- `Condition` is either a leaf (`attribute`/`operator`) or a composite
+  (`all`/`any`), with LLD §8.1's operator set exactly: `eq`, `in`, `lt`, `gt`,
+  `confidence_gte`.
+- Malformed YAML fails with a real line and column from the parser's own mark;
+  a schema error resolves the offending rule's `id:` back to its line number,
+  because "rules.3.penalty" alone is not a usable message for someone editing
+  a policy file.
+- **The confidence guard is a load-time error.** A rule keyed on any attribute
+  that can arrive `INFERRED` must carry a `confidence_gte` on that same
+  attribute or the policy refuses to load. `INFERABLE_ATTRIBUTES` is
+  deliberately a denylist of what can be inferred rather than an allowlist of
+  what is always observed: a newly-inferred attribute that nobody remembers to
+  list would otherwise slip past the guard silently, whereas a newly-observed
+  one listed here costs only a redundant guard.
+
+**5.3 Baseline policy** — `assess/policies/baseline.yaml`
+- All 14 rules from the step 5.3 minimum set, each with severity, penalty,
+  a description explaining the actual attack, remediation naming the exact
+  strongSwan parameter and value (FR-5.7), standards references and ATT&CK IDs.
+- Every rule's penalty is validated against its own category cap at load.
+  ("Penalties sum within the category caps" is read as *per rule*, not as the
+  sum across a category — 3DES alone is 30, the whole cryptographic cap, and
+  the fixtures themselves carry categories summing past their caps for the
+  scorer to clamp.)
+
+**5.4 Rule evaluator** — `assess/engine.py`
+- An `UNAVAILABLE` attribute matches nothing, ever. Firing a rule against a
+  value the capture never showed is exactly the fabrication the provenance
+  system exists to prevent, so this is a hard rule rather than a default.
+- `confidence_gte` treats `OBSERVED` as passing any threshold (a parsed fact
+  carries no confidence by construction), `UNAVAILABLE` as never passing, and
+  `INFERRED` as passing only above the bar.
+- Three **derived attributes** (`metadata_exposure_confidence`,
+  `rekey_observed`, `sa_duration_s`) are computed per SA because three of the
+  required rules cannot be expressed against contract fields alone — see
+  Deviations.
+
+**5.5, 5.6 Scoring and metadata exposure** — `assess/scoring.py`
+- Category caps consumed by the most severe finding first, floor at zero, per
+  LLD §8.3. Rating bands are 20 points wide (`RATING_BANDS`); the contract
+  explicitly left the thresholds to this step, and these put the two PRD §16
+  demo tunnels at opposite ends without having been drawn to flatter them.
+- Exposure scales from the 1/7 chance level (LLD §8.4), so a classifier that
+  learned nothing scores 0 rather than 14. Both fixtures' stored exposure
+  scores (95 and 92) are reproduced exactly by the formula.
+
+**5.7, 5.8 Threat matrix and evidence caps**
+- Findings grouped by ATT&CK technique with the PRD §10.3 names and tactics.
+- `capped_evidence()` truncates `packet_indices` to 20 and records
+  `total_matching` — a finding matching 100,000 packets serialises to well
+  under 2 KB.
+
+**5.9 Determinism (NFR-4)**
+- `evaluate()` takes `assessment_id`, `capture_id` and `generated_at` as
+  arguments rather than generating them, so two runs over identical input
+  produce byte-identical JSON. Both the identical-run and the
+  differs-only-by-injected-identity cases are asserted.
+
+**Testing**
+- 55 new tests. The engine reproduces **both fixtures exactly**: the same
+  finding IDs, the same severities, categories and penalties per finding, the
+  same category penalty breakdown, the same total, the same rating, and the
+  same exposure score — for a policy file written from the specs rather than
+  reverse-engineered from the fixtures.
+
+### Deviations from the specs — Phase 5
+
+- **`SecurityAssociation` gained `downgrade_available: Attribute[bool]`.**
+  LLD §6.3 puts `downgrade_available` on Track A's `IkeNegotiation` and step
+  5.3 requires a `CRYPTO-DOWNGRADE-OFFER` rule, but LLD §3 gave the value
+  nowhere to live in the document the rule evaluates — the rule was
+  unimplementable as specified. The contract was changed first and propagated:
+  Track A's `correlate.py` now populates it, both step 1.4 fixtures carry it,
+  and `tests/test_contract.py`'s builder sets it. No migration was needed;
+  SAs are stored as JSON.
+- **Three derived attributes extend the policy language.** LLD §8.1 only
+  contemplates rules keyed on `SecurityAssociation` fields.
+  `META-HIGH-EXPOSURE` needs an aggregate over `inner_traffic`, and
+  `KEYMGMT-NO-REKEY-OBSERVED` needs both whether a rekey was seen and how long
+  the SA was watched — "no rekey in a three-minute capture" is a fact about the
+  capture, not the deployment, so the rule carries a 2-hour observation floor.
+- **`Evidence.measured` on generated findings is thinner than the fixtures'.**
+  The hand-written fixtures carry rich domain measurements
+  (`sweet32_safe_data_gb`, `modp_prime_bits`); the engine records the attribute
+  values the rule actually tested. Step 5.4's Done-when is about finding IDs,
+  and inventing measurements a rule did not compute would be the same
+  fabrication problem in a different field.
+
+### Added — Phase 4, Track A
+
+Implementation-plan steps 4.1–4.8.
+
+**4.1 tshark invocation wrapper** — `track_a/ike_parser.py`
+- `run_tshark()` shells out to `tshark -r <pcap> -Y isakmp -T json
+  --no-duplicate-keys` per LLD §6.1, parses the JSON, and raises `TrackAError`
+  with the actual cause for a missing binary, a non-zero exit, a timeout, or
+  output that is not valid JSON. `--no-duplicate-keys` is load-bearing: without
+  it, tshark's default JSON rendering overwrites a repeated field (a second
+  proposal, a second transform) instead of producing a list.
+
+**4.2, 4.3 SA payload extraction** — `track_a/transforms.py`, `ike_parser.py`
+- The IANA-registered numeric IDs (RFC 7296 §3.3.2 for IKEv2, RFC 2409
+  Appendix A for IKEv1) live in `transforms.py` and do not depend on
+  Wireshark's JSON field *naming* — only on protocol constants that do not
+  drift. All of the naming risk LLD §6.1 warns about is deliberately
+  concentrated in one function, `ike_parser.py`'s `parse_isakmp_json()` and
+  its helpers, so a future field-name correction touches one place.
+- IKEv1's exchange mode (main = 2, aggressive = 4) and IKEv2's SA-payload
+  transform types (1 ENCR, 2 PRF, 3 INTEG, 4 DH, 5 ESN) both come out of the
+  same `Proposal`/`Transform`/`TransformAttr` IR, despite IKEv1 encoding
+  everything as attributes of one monolithic transform and IKEv2 splitting
+  them into distinct transform types.
+
+**4.4 Proposed vs selected** — `IkeNegotiation` in `ike_parser.py`
+- `build_negotiations()` groups messages by `init_spi` and treats the
+  earlier-captured message with an SA payload as proposed, the later as
+  selected — needing no per-version "which message is the response" field,
+  since IKEv1 has no such flag at all and capture order settles it for both.
+- `downgrade_available` walks every ENCR choice in every offered proposal
+  (not just the first) against a deliberately coarse strength ranking
+  (`transforms.is_weaker_encryption`): family first — NULL < DES < 3DES <
+  everything AES/ChaCha-sized — then key length within a family. An unmapped
+  transform ID is unknown strength, never treated as weaker by default.
+
+**4.5 Lifetime handling**
+- IKEv1 attributes 11 (Life Type) and 12 (Life Duration) map to
+  `negotiated_lifetime_s` only when Life Type is seconds (1), not kilobytes
+  (2). IKEv2 is `None` unconditionally in the IR and `UNAVAILABLE` in the
+  assembled `SecurityAssociation` — RFC 7296 removed lifetime negotiation.
+
+**4.6 SPI correlation** — `track_a/correlate.py`
+- **Child SA SPIs are not observable from either IKE version**, and this
+  governs the whole step. IKEv1 proposes Child SA parameters in Quick Mode,
+  IKEv2 in `IKE_AUTH`/`CREATE_CHILD_SA` — both encrypted under keys derived
+  from the exchange above them, so tshark shows neither the SPI nor the
+  transforms without decryption keys nobody has. `correlate_negotiation()`
+  therefore matches an ESP/AH flow to the negotiation that plausibly created
+  it by outer endpoints plus timing (`CORRELATION_WINDOW_S = 30s`) instead —
+  the most recent negotiation between the same two addresses that completed
+  before the flow's first packet.
+
+**4.7 NAT-T and auth method**
+- NAT-T: `NAT_DETECTION_SOURCE_IP` (16406) / `_DESTINATION_IP` (16407) notify
+  payloads, checked on both the request and response side of a negotiation.
+- Auth method: IKEv1 transform attribute 3, mapped through
+  `transforms.ikev1_auth_method`. IKEv2 is `UNAVAILABLE` unconditionally — the
+  AUTH payload is inside `IKE_AUTH`, and the parser does not fabricate a value
+  there.
+
+**4.8 Track A → SecurityAssociation** — `track_a/correlate.py`
+- `assemble_security_association()` is where LLD §6.4's distinction becomes
+  concrete and where most of this step's design judgement sits.
+  `SecurityAssociation`'s crypto fields (`encryption_alg`, `encryption_keylen`,
+  `integrity_alg`) describe the **Child/ESP SA** — the thing that actually
+  encrypts traffic — but Track A can only ever observe the **IKE SA's own**
+  proposal (§4.6: the Child SA's is encrypted for both IKE versions). These
+  three fields are therefore `INFERRED` same-family guesses from the IKE SA's
+  values, at a deliberately moderate confidence (0.6), with a note explaining
+  why — never `OBSERVED`, per LLD §6.4's explicit instruction not to dress an
+  inference up as a fact.
+- `dh_group` and `prf_alg` are the exception and are genuinely `OBSERVED`:
+  both belong to the IKE SA's *own* `IKE_SA_INIT`/Phase 1 proposal, not to a
+  guess about the Child SA, so there is nothing inferred about them.
+- `operating_mode`, `pfs_enabled`, `observed_rekey_s` and `replay_sane` are
+  honestly `UNAVAILABLE` — they are Track B's job (steps 7.3, 7.4, 7.5 /
+  9.x), not yet built, and Track A does not guess at them to look more
+  complete than it is.
+
+**Testing**
+- 39 new tests, all against hand-built tshark JSON (`tests/_tshark_json.py`)
+  rather than a real capture — no Docker or tshark binary was available in
+  this environment (see CHANGELOG's Phase 2/3 entries for the same
+  constraint). `run_tshark()` itself is still exercised as a genuine
+  subprocess against a small fake `tshark` shell script, so step 4.1's
+  process-and-JSON-parse path is real, even though the JSON it parses is not
+  from a real tshark.
+- Ruff, ruff-format and mypy strict clean. No new dependencies — Track A
+  shells out rather than importing anything.
+
+### Not verified — Phase 4
+
+- **tshark's JSON field names, entirely.** This is the largest gap of the
+  three phases landed so far. Where Phase 3's dpkt-based reader was checked
+  interactively against the real, installed `dpkt` library, `ike_parser.py`'s
+  `parse_isakmp_json()` was written from documented, long-stable `isakmp.*`
+  display-filter names with no way to run it against a real `tshark -T json`
+  output in this environment (no Docker, no `tshark`, and installing it needs
+  interactive `sudo`). LLD §6.1's own warning — a field-name drift "silently
+  breaks the parser" and produces wrong values, not an error — applies at
+  full strength here. The adapter reads defensively (multiple candidate keys,
+  suffix-matching for the most deeply nested structures, tolerant integer
+  parsing) specifically because of this, but that is a mitigation, not a
+  verification. **Running this against one real IKEv1 and one real IKEv2
+  testbed capture, comparing the raw JSON against this module's assumptions
+  field by field, should be the first thing anyone with tshark available
+  does with Track A.**
+- **Step 4.8's actual Done-when** — a `SecurityAssociation` matching
+  `labels.json` exactly for every parseable field, on a real testbed capture
+  — has not been run. See the open spec question below for why "parseable"
+  is doing real work in that sentence for this step specifically.
+- **The correlation window (30s) is a documented guess**, not tuned against
+  real inter-arrival timing between an IKE negotiation completing and its
+  Child SA's first packet. LLD §10.2's session lifecycle only guarantees it
+  is short, not exactly how short.
+- **`downgrade_available`'s strength ranking is coarse by design** — everything
+  AES-CBC/CTR/CCM/GCM-sized and ChaCha20 rank equally. It has not been asked
+  to make a finer distinction than the LLD §6.3 example (3DES vs AES-256), and
+  extending it without a rule that needs the extra precision would be
+  speculative.
+
+### Deviations from the specs — Phase 4
+
+- **`track_a/correlate.py` also holds `assemble_security_association()` and
+  `run_track_a()`**, not just correlation. LLD §2's tree gives `track_a/`
+  exactly three files (`ike_parser.py`, `transforms.py`, `correlate.py`) with
+  no fourth file for assembly; assembling a `SecurityAssociation` *is*
+  correlation's next step and belongs beside it rather than forcing a new
+  module the plan does not list.
+- **`Proposal`, `Transform`, `TransformAttr` and `IkeNegotiation` are this
+  module's own schemas.** LLD §6.3 names `IkeNegotiation` and `Proposal`
+  without giving either a field list (the same situation Phase 3's `SAPair`
+  was in). `IkeNegotiation` also carries `request_frame`/`response_frame` —
+  not mentioned anywhere in LLD — purely so assembled `SecurityAssociation`
+  attributes can cite real packet indices in their `Evidence` instead of
+  none at all.
+- **`IsakmpMessage` carries no `is_response` field.** IKEv2 has an explicit
+  flag for this; IKEv1 has none. Rather than reading an uncertain flag name
+  for one version and inventing a fallback for the other, negotiations are
+  built by capture order for both, which is simpler and equally correct as
+  long as tcpdump's own ordering is trusted — which everywhere else in this
+  project it already is.
+
+### Open spec questions — Phase 4
+
+- **LLD §6.4's same-family Child SA inference and this project's own testbed
+   are in tension.** §6.4 assumes the common case is that a Child SA reuses
+   the IKE SA's algorithm family — reasonable in general, but this project's
+   *own* testbed (step 2.2's `ike_proposal_crypto`, Phase 2 deviations above)
+   deliberately negotiates the IKE SA on CBC-plus-HMAC even when the ESP
+   suite is AEAD, specifically because IKEv1 cannot negotiate AEAD for Phase
+   1. That means the one dataset this project can generate on demand is
+   exactly the case where step 4.8's same-family guess is *expected* to be
+   wrong for every GCM-suite session — not an edge case, a matrix cell. Two
+   fields in `labels.json`'s `expected` block (`encryption_alg`,
+   `encryption_keylen`, `integrity_alg`) record the true Child SA suite,
+   which a correctly-honest Track A cannot match by design once it differs
+   from the IKE SA's family; the automated regression test for step 4.8 will
+   need to treat these three as "must be `INFERRED` with a note", not
+   "must equal `labels.json`", and that distinction needs to be explicit
+   before step 8.2's label-verification harness is built, or it will flag
+   correct, honest output as a mismatch.
+
+### Added — Phase 3, ingest
+
+Implementation-plan steps 3.1–3.6.
+
+**3.1 PacketRecord and FlowKey** — `ingest/reader.py`
+- Both `NamedTuple`s from LLD §5, exactly as specified.
+
+**3.2 PCAP reader — IPv4** — `ingest/reader.py`
+- Hand-rolled classic-pcap framing (global header, then per-record headers)
+  rather than `dpkt.pcap.Reader`'s convenience iterator, because that iterator
+  discards the per-record `orig_len` field and there is no public way to get
+  it back — and `orig_len` vs `caplen` is exactly what step 3.6's `truncated`
+  flag needs. `dpkt` still does every bit of header decoding: Ethernet, SLL,
+  SLL2 and raw IP at the link layer; IPv4, IPv6, ESP, AH and UDP above it.
+- Every frame produces exactly one `PacketRecord`, classified or not
+  (`proto="other"` for anything else), so the reader's packet count is
+  directly comparable to `tshark -r file | wc -l`.
+- `esp_payload_len` is always the actual ESP ciphertext-plus-ICV length — the
+  bytes left after ESP's own 8-byte SPI-and-sequence header — computed the
+  same way regardless of encapsulation: raw ESP (protocol 50), NAT-T-in-UDP,
+  or IPv6 via an extension header. A fixed subtraction from the declared IP
+  payload length would be wrong for NAT-T by exactly the 8-byte UDP header,
+  silently shifting every length-lattice congruence in LLD §7.2 for every
+  NAT-T session.
+
+**3.3 UDP 4500 disambiguation** — folded into `ingest/reader.py`
+- First four bytes of a UDP/4500 payload: all-zero is the non-ESP marker
+  (IKE), anything else is an ESP SPI. Port 500 is always IKE. A NAT-T
+  keepalive (a single `0xFF` byte) is neither, and falls back to
+  `proto="other"` rather than guessing or raising.
+
+**3.4 IPv6 support** — `ingest/reader.py`
+- `dpkt`'s IPv6 unpacker resolves ESP and AH as `extension_hdrs` entries
+  rather than as `.data` — worth naming, since `ip6.p` is never set at all
+  when the chain terminates in ESP (`IP6ESPHeader` has no `nxt` field for the
+  walk to continue from). ESP is checked before AH; this project's testbed
+  never negotiates AH-then-ESP.
+
+**3.5 Flow assembly** — `ingest/flow.py`
+- `assemble_flows()` groups ESP/AH packets by `FlowKey` and pairs
+  reverse-direction flows whose time ranges overlap into `SAPair`. `SAPair`
+  has no LLD §5 schema — the spec names it without one — so its shape
+  (`forward`, optional `reverse`, `paired`) is this step's design decision,
+  made to satisfy the Done-when wording exactly: one pair for a bidirectional
+  capture, one flagged-unpaired pair for a one-directional one, never a raise.
+
+**3.6 Capture quality** — `ingest/quality.py`
+- Builds the `CaptureQuality` that already existed in `core/schema.py` (step
+  1.3). `ike_complete` needed a signal `PacketRecord` deliberately does not
+  carry — LLD §5's `NamedTuple` is fixed, and "no deep dissection" is the
+  point — so the reader also returns `ike_message_ids`, a sidecar list of
+  ISAKMP message IDs seen in passing while classifying `isakmp`/`isakmp_natt`
+  packets, purely so `ike_complete` can check for message ID 0 without a
+  second pass over the file.
+
+**Testing**
+- 27 new tests, all synthetic: no Docker was available in the environment this
+  work was done in, so `tests/_pcap.py` builds classic-pcap bytes by hand
+  (every supported link type, IPv4 and IPv6, ESP/AH/UDP) rather than depending
+  on a real Phase 2 capture.
+- Added `dpkt` as a runtime dependency and `dpkt.*` to mypy's
+  `ignore_missing_imports` overrides — it ships no type stubs. Ruff,
+  ruff-format and mypy strict clean.
+
+### Not verified — Phase 3
+
+- **Step 3.2's actual Done-when** — packet count against
+  `tshark -r file | wc -l` on a real Phase 2 capture — could not be
+  demonstrated: no Docker and no `tshark` were available in the environment
+  this work was done in, and installing `tshark` needed interactive `sudo`.
+  The synthetic-pcap tests exercise the same decoding paths but are not that
+  comparison.
+- **Steps 3.2–3.4 against a real testbed capture generally.** All decoding
+  logic is validated against hand-built packets whose byte layout is believed
+  correct; none of it has run against tcpdump/strongSwan's actual output yet.
+- **NAT-T (step 3.3) still has no testbed data to validate against.** Open
+  spec question 6 below (carried over from Phase 2) already flagged this: the
+  matrix has no NAT dimension, so ESP is always raw protocol 50 in every
+  testbed capture. Step 3.3's disambiguation is exercised only by synthetic
+  packets until that gap is closed.
+- **`esp_sa_count`'s definition.** LLD §5 does not define what counts as one
+  ESP "SA" for `CaptureQuality.esp_sa_count`; this counts each *directional*
+  flow, so a paired bidirectional tunnel counts as 2 — on the basis that a
+  Child SA is unidirectional and each direction gets its own SPI. Worth
+  confirming against how Phase 9 actually wants to consume this number.
+
+### Deviations from the specs — Phase 3
+
+- **`ingest/reader.py` does not use `dpkt.pcap.Reader`.** Its `__iter__`
+  discards the per-record `orig_len` (the original wire length before snaplen
+  truncation) that `truncated` in step 3.6 depends on, and there is no public
+  accessor for it. The module parses the classic-pcap global and per-record
+  headers directly — the same magic-number, endianness and nanosecond
+  detection `dpkt.pcap` itself does — and hands frame bytes to `dpkt`'s
+  link-layer and IP/IPv6/ESP/AH/UDP classes for everything past that. pcapng
+  is out of scope: nothing in this project's pipeline writes it.
+- **`IngestResult` wraps `read_packets`'s return value** rather than a bare
+  `list[PacketRecord]`. LLD §5 fixes `PacketRecord`'s and `FlowKey`'s shapes,
+  not the reader function's signature; `ike_message_ids` exists solely so
+  step 3.6 can compute `ike_complete` without parsing the file twice.
+- **`SAPair` is a new type**, not given a schema in LLD §5's code block. See
+  step 3.5 above.
+
 ### Added — Phase 2, testbed
 
 Implementation-plan steps 2.1–2.10, plus the two Phase 0 spikes (0.1, 0.2) they

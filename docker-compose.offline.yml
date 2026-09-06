@@ -1,0 +1,95 @@
+# The air-gapped stack. Implementation-plan step 11.4, NFR-3, NFR-6.
+#
+#   docker compose -f docker-compose.offline.yml up --build
+#   open http://localhost:3000
+#
+# Two services, SQLite, and no outbound network path. This is the
+# configuration to demo on: Neon scales to zero and a cold start mid-demo is
+# an avoidable risk (step 11.6 says so explicitly).
+#
+# The isolation is enforced, not merely intended:
+#
+#   * `internal: true` on the backing network means Docker creates no gateway
+#     to the host's network for it. A container attached only to that network
+#     cannot reach the internet even if something in it tries.
+#   * The frontend sits on both networks because a browser on the host has to
+#     reach it. It is the only thing with a published port.
+#   * The backend has no published port at all. It is reachable only from the
+#     frontend's proxy route, which is the arrangement LLD section 11.2
+#     describes anyway ("the browser never calls it directly").
+#
+# NFR-6 says uploaded captures are processed locally with no external service
+# calls. Under this file that is a property of the topology rather than a
+# promise about the code.
+
+name: ipsec-analyzer-offline
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # No ports. Nothing outside the compose network reaches this.
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/analyzer.db
+      DATABASE_URL_DIRECT: sqlite+aiosqlite:////data/analyzer.db
+      STORAGE_PATH: /data/captures
+      POLICY_PATH: /app/src/analyzer/assess/policies/baseline.yaml
+      MODEL_DIR: /app/models
+      MAX_UPLOAD_BYTES: "2147483648"
+      MAX_CONCURRENT_ANALYSES: "2"
+    volumes:
+      - analyzer-data:/data
+    networks:
+      - internal
+    command: >
+      sh -c "mkdir -p /data/captures &&
+             uv run alembic upgrade head &&
+             uv run uvicorn analyzer.api.main:create_app --factory
+                     --host 0.0.0.0 --port 8000"
+    healthcheck:
+      # Python rather than curl: the backend image carries an interpreter by
+      # definition and need not also carry an HTTP client for its own
+      # healthcheck.
+      test:
+        - CMD
+        - uv
+        - run
+        - python
+        - -c
+        - |
+          import urllib.request, sys
+          sys.exit(0 if urllib.request.urlopen(
+              "http://localhost:8000/api/v1/health", timeout=5).status == 200 else 1)
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      API_BASE_URL: http://backend:8000
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - internal
+      - edge
+    restart: unless-stopped
+
+networks:
+  internal:
+    # No gateway to anywhere. This is the line that makes the claim true.
+    internal: true
+  edge:
+    driver: bridge
+
+volumes:
+  analyzer-data:

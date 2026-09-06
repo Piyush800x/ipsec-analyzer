@@ -54,11 +54,59 @@ component no comparable tool reports.
 
 ## Current status
 
-Gate **G1 — Contract locked**. The contract and the storage layer exist; the
-analysis pipeline does not yet.
+Gate **G3 — End to end**. A capture goes in one end and an assessment with
+both report formats comes out the other, through the dashboard.
 
 | Module | State |
 |---|---|
+| Core contract (`core/schema.py`) | **Done** — the single source of truth |
+| Database, migrations, session factory | **Done** — PostgreSQL and SQLite |
+| M1 Testbed | **Done** — builds real tunnels; needs Docker to run |
+| M2 Ingest | **Done** — pcap reader, flow assembly, capture quality |
+| M3 Track A | **Done** — IKE parsing, correlation, `SecurityAssociation` |
+| M4 Track B | **Partial** — the deterministic half; no models trained |
+| M5 Assessment | **Done** — 14-rule policy, scoring, threat matrix |
+| M6 Presentation | **Done** — dashboard, both PDF report formats |
+| Dataset generation | **Blocked** — needs Docker; harness and docs exist |
+
+**What is honestly not finished.** No machine-learning model has been trained,
+because that needs the labelled dataset from Phase 8, which needs a Docker
+daemon this was built without. Every field that would depend on a model reports
+*unavailable with a reason* rather than a guess — which is the same thing the
+product does for an analyst on a degraded capture, so the seam is real rather
+than a placeholder. The traffic classifier, the mode classifier, calibration
+and the external validation in PRD §8.4 are therefore unmeasured, not missed.
+
+The other standing gap is that `tshark`'s JSON field names have never been
+checked against a real binary (see `manualtesting.md` MT-16). Track A's parsing
+logic is tested; what it calls things is not.
+
+See [CHANGELOG.md](CHANGELOG.md) for exactly what landed and what did not, and
+[manualtesting.md](manualtesting.md) for what has been confirmed by hand.
+
+## Try it
+
+```bash
+# offline, no database server, no models needed
+cd backend && uv sync --all-groups && uv run alembic upgrade head
+uv run uvicorn analyzer.api.main:create_app --factory --port 8000 &
+
+cd ../frontend && npm ci && USE_FIXTURES=1 npm run dev
+```
+
+Open <http://localhost:3000>. With `USE_FIXTURES=1` the dashboard renders the
+two demo assessments with the backend switched off entirely, which is the
+fastest way to see what the product claims. Drop the flag and upload a PCAP to
+run the real pipeline.
+
+Both PDF reports:
+
+```bash
+curl -o exec.pdf  "localhost:8000/api/v1/assessments/<id>/report?format=executive"
+curl -o tech.pdf  "localhost:8000/api/v1/assessments/<id>/report?format=technical"
+```
+
+---|---|
 | Core contract (`core/schema.py`) | **Done** — the single source of truth |
 | Database, migrations, session factory | **Done** — PostgreSQL and SQLite |
 | Settings, CI, container toolchain | **Done** |

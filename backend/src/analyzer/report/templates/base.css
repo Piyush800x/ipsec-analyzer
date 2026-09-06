@@ -1,0 +1,195 @@
+/* Shared print styling for both report formats. Step 10.1.
+ *
+ * Print, not screen: physical page size, real margins, running headers, and
+ * page numbers. A PDF that is a screenshot of a web page reads as one.
+ */
+
+@page {
+  size: A4;
+  margin: 20mm 18mm 18mm 18mm;
+
+  @top-right {
+    content: string(doc-title);
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8pt;
+    color: #71717a;
+  }
+
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8pt;
+    color: #71717a;
+  }
+
+  @bottom-left {
+    content: "IPsec VPN Protocol Analyzer";
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8pt;
+    color: #71717a;
+  }
+}
+
+html {
+  font-family: "DejaVu Sans", sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  color: #18181b;
+}
+
+h1 {
+  string-set: doc-title content();
+  font-size: 20pt;
+  margin: 0 0 2mm;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: 12pt;
+  margin: 7mm 0 2mm;
+  padding-bottom: 1mm;
+  border-bottom: 0.4pt solid #d4d4d8;
+}
+
+h3 {
+  font-size: 10pt;
+  margin: 4mm 0 1mm;
+}
+
+p {
+  margin: 0 0 2.5mm;
+}
+
+.subtitle {
+  color: #52525b;
+  font-size: 9pt;
+  margin-bottom: 5mm;
+}
+
+/* --- score block --------------------------------------------------------- */
+
+.score-band {
+  display: flex;
+  gap: 8mm;
+  align-items: baseline;
+  padding: 4mm 5mm;
+  border: 0.5pt solid #d4d4d8;
+  border-radius: 2mm;
+  margin-bottom: 5mm;
+  break-inside: avoid;
+}
+
+.score-value {
+  font-size: 32pt;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.score-label {
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+}
+
+.rating-critical { color: #b91c1c; }
+.rating-poor     { color: #c2410c; }
+.rating-fair     { color: #b45309; }
+.rating-good     { color: #4d7c0f; }
+.rating-strong   { color: #047857; }
+
+/* --- tables -------------------------------------------------------------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 2mm 0 4mm;
+  font-size: 8.5pt;
+}
+
+th {
+  text-align: left;
+  font-size: 7.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #71717a;
+  border-bottom: 0.5pt solid #a1a1aa;
+  padding: 1.2mm 2mm 1.2mm 0;
+}
+
+td {
+  padding: 1.4mm 2mm 1.4mm 0;
+  border-bottom: 0.3pt solid #e4e4e7;
+  vertical-align: top;
+}
+
+tr { break-inside: avoid; }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* --- severity ------------------------------------------------------------ */
+
+.sev {
+  display: inline-block;
+  padding: 0.3mm 1.6mm;
+  border-radius: 1mm;
+  font-size: 7pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sev-critical      { background: #fee2e2; color: #991b1b; }
+.sev-high          { background: #ffedd5; color: #9a3412; }
+.sev-medium        { background: #fef3c7; color: #92400e; }
+.sev-low           { background: #e0f2fe; color: #075985; }
+.sev-informational { background: #f4f4f5; color: #3f3f46; }
+
+/* --- provenance ---------------------------------------------------------- */
+
+.prov {
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 1.5mm;
+}
+
+.prov-observed    { color: #075985; }
+.prov-inferred    { color: #6d28d9; }
+.prov-unavailable { color: #71717a; }
+
+/* An unavailable value renders as its reason, never as a blank or a dash --
+ * LLD section 11.3 and FR-4.9. The report follows the dashboard here. */
+.unavailable-reason {
+  color: #52525b;
+  font-style: italic;
+  font-size: 8pt;
+}
+
+.finding {
+  break-inside: avoid;
+  margin-bottom: 4mm;
+  padding-bottom: 2mm;
+  border-bottom: 0.3pt solid #e4e4e7;
+}
+
+.evidence {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 7.5pt;
+  color: #52525b;
+  background: #fafafa;
+  padding: 1.5mm 2mm;
+  border-left: 1pt solid #d4d4d8;
+  margin: 1.5mm 0;
+}
+
+.callout {
+  border-left: 2pt solid #a1a1aa;
+  padding: 2mm 0 2mm 3mm;
+  margin: 3mm 0;
+  background: #fafafa;
+  break-inside: avoid;
+}
+
+.muted { color: #71717a; }
+.small { font-size: 8pt; }

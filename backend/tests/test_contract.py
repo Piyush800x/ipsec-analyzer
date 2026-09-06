@@ -95,6 +95,7 @@ def _sa() -> SecurityAssociation:
         esn_negotiated=Attribute[bool].observed(True),
         replay_sane=Attribute[bool].inferred(True, 0.99),
         nat_traversal=Attribute[bool].observed(False),
+        downgrade_available=Attribute[bool].observed(False),
         inner_traffic=[
             TrafficPrediction(
                 label=TrafficClass.VOIP,
