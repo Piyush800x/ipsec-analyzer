@@ -3,12 +3,12 @@
 Two hand-written `Assessment` documents, one per demo tunnel in
 [PRD §16](../../../docs/ipsec-analyzer-prd.md). Produced by step 1.4.
 
-These are **not** throwaway test data. The frontend (Phase 7) and the report
-templates (Phase 10) build against them for weeks before the assessment engine
-produces anything, and step 5.4 asserts that the engine reproduces the weak
+These are **not** throwaway test data. Three things now depend on them: the
+frontend renders them directly under `USE_FIXTURES=1`, both report templates
+render from them, and step 5.4 asserts that the engine reproduces the weak
 fixture's finding set exactly. Changing one of these files changes a contract
-three workstreams depend on — run `uv run pytest tests/test_fixtures.py` after
-any edit.
+three workstreams depend on — run `uv run pytest tests/test_fixtures.py
+tests/test_report.py` after any edit, and re-check the frontend fixture pages.
 
 | File | Tunnel | Score | Findings |
 |---|---|---|---|
@@ -66,11 +66,26 @@ real data rather than contrived rows.
 `tests/test_fixtures.py` checks every one of these, so the fixtures cannot drift
 away from the formulas the engine will implement.
 
+## Changes since step 1.4
+
+- **`downgrade_available` was added to `SecurityAssociation`** in Phase 5, so
+  both fixtures carry it. It is what the `IKE-DOWNGRADE` rule reads, and it is
+  `unavailable` in both — detecting a downgrade needs the initiator's full
+  proposal list, and the fixtures record only the selected proposal.
+- **`model_versions` names two models that do not exist.** These fixtures
+  describe the finished system, so they cite `traffic-cnn1d` and `mode-lgbm`
+  version strings; no such artefact has been trained (see
+  [../../models/README.md](../../models/README.md)). That is deliberate — they
+  are what a real assessment will look like, and the report templates need a
+  populated capability matrix to render against. Do not read them as evidence
+  that a model exists.
+
 ## Known gaps
 
 - Neither fixture is **ESP-only**, which step 7.8 wants in order to render AES
   key length as unavailable. Step 1.4 asks for two fixtures and these are those
-  two; a third belongs to whoever picks up 7.8 or 11.1.
+  two. `tests/test_degradation.py` covers the case instead, building ESP-only
+  captures on the fly.
 - No `low` or `informational` severity appears in either fixture, because the
   step 5.3 rule set has no rule that produces one. The findings table should
   still be built to render all five.

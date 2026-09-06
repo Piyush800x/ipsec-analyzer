@@ -106,21 +106,6 @@ curl -o exec.pdf  "localhost:8000/api/v1/assessments/<id>/report?format=executiv
 curl -o tech.pdf  "localhost:8000/api/v1/assessments/<id>/report?format=technical"
 ```
 
----|---|
-| Core contract (`core/schema.py`) | **Done** — the single source of truth |
-| Database, migrations, session factory | **Done** — PostgreSQL and SQLite |
-| Settings, CI, container toolchain | **Done** |
-| Demo fixtures | **Done** — two hand-written assessments |
-| M1 Testbed · M2 Ingest · M3 Track A | Not started |
-| M4 Track B · M5 Assessment · M6 Presentation | Not started |
-
-There is no API and no dashboard yet — `npm run dev` serves the stock Next.js
-page. What you can do today is run the test suite, exercise the migrations
-against either backend, and build against the two fixture assessments.
-
-See [CHANGELOG.md](CHANGELOG.md) for exactly what landed, and
-[manualtesting.md](manualtesting.md) for what has been confirmed by hand.
-
 ---
 
 ## Quick start
@@ -133,9 +118,13 @@ git clone https://github.com/Piyush800x/ipsec-analyzer.git
 cd ipsec-analyzer
 
 cp .env.example .env          # then set DATABASE_URL — see startup.md §3
-cd backend && mkdir -p data && uv sync && uv run alembic upgrade head
-uv run pytest
+cd backend && mkdir -p data && uv sync --all-groups && uv run alembic upgrade head
+uv run pytest                 # expect 508 passed, 68 skipped
 ```
+
+`--all-groups`, not a bare `uv sync`: the optional groups carry the testbed,
+the report renderer and the policy loader, and without them four test modules
+fail at collection.
 
 For the offline path, one line in `.env` is enough:
 
@@ -168,8 +157,8 @@ ipsec-analyzer/
 └── scripts/              ci-local.sh, pg-dev.sh
 ```
 
-Modules carrying only a docstring are skeletons for a later phase. That is
-deliberate: the import graph and the plan agree from day one.
+Every module above is implemented. `backend/models/` is empty, and honestly so
+— see [its README](backend/models/README.md).
 
 ---
 
