@@ -9,6 +9,7 @@ report leaking into the executive one.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -255,14 +256,22 @@ def test_importing_the_api_does_not_import_weasyprint() -> None:
 
     A subprocess, because ``weasyprint`` may already be in this process's
     ``sys.modules`` from another test.
+
+    The child gets an explicit ``DATABASE_URL``: ``create_app`` validates
+    settings eagerly, and a developer machine only satisfies that because a
+    ``.env`` sits at the repository root. Inheriting that made the test pass
+    locally and fail on CI for a reason -- missing configuration -- that has
+    nothing to do with what it is guarding.
     """
     probe = (
         "import sys;import analyzer.api.main as m;m.create_app();print('weasyprint' in sys.modules)"
     )
+    env = {**os.environ, "DATABASE_URL": "sqlite+aiosqlite:///:memory:"}
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+        [sys.executable, "-c", probe], capture_output=True, text=True, env=env, check=False
     )
 
+    assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("False"), result.stdout
 
 

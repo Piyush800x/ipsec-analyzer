@@ -74,6 +74,20 @@ machine; two thirds of that promise was Linux-only.
   the build that would have satisfied it. Both files were wrong in the same
   way; both are fixed.
 
+**The WeasyPrint guard test now supplies its own configuration** —
+`tests/test_reports.py`
+- `test_importing_the_api_does_not_import_weasyprint` spawns a subprocess that
+  calls `create_app()`, which validates settings eagerly and so requires
+  `DATABASE_URL`. On a developer machine the repo-root `.env` satisfies that
+  silently; CI has no `.env` and its pytest step sets `TEST_POSTGRES_URL`, not
+  `DATABASE_URL`. The child died with `ConfigurationError` and the test failed
+  on Linux for a reason unrelated to what it guards.
+- The child now gets an explicit `DATABASE_URL=sqlite+aiosqlite:///:memory:`
+  (no connection is opened — `create_app` only constructs the engine), and
+  `check=True` gave way to asserting on `returncode` with the child's `stderr`
+  as the message, so the next failure of this kind names itself instead of
+  arriving as a bare `CalledProcessError`.
+
 Verified on Windows 10: `uv run pytest` is **514 passed, 62 skipped, 0
 failed** (was 5 failed plus 3 collection errors). `uvicorn` starts,
 `/api/v1/health` returns 200, and upload → analyse → assessment → HTML report
