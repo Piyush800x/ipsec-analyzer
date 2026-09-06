@@ -25,9 +25,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, TypeVar
 
+from analyzer.core.enums import EncryptionAlg, IntegrityAlg
 from analyzer.core.schema import Attribute, CaptureQuality, Evidence
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +39,17 @@ class CipherCandidate:
     iv_len: int
     icv_len: int
     block_size: int
+    encryption_alg: EncryptionAlg
+    integrity_alg: IntegrityAlg
+    """``name`` is the human-readable suite, for evidence and report prose.
+
+    ``encryption_alg`` and ``integrity_alg`` are what the contract actually
+    stores, and they are separate fields on ``SecurityAssociation`` rather than
+    one combined string. Carrying both here is what lets the sieve answer the
+    two questions independently -- see ``detect_encryption``. An AEAD suite
+    authenticates internally and takes ``IntegrityAlg.NONE``, which is a real
+    statement about the suite, not a missing value.
+    """
 
     @property
     def overhead(self) -> int:
@@ -54,14 +68,41 @@ class CipherCandidate:
 
 
 CANDIDATES: Final[tuple[CipherCandidate, ...]] = (
-    CipherCandidate("AES-CBC + HMAC-SHA1-96", 16, 12, 16),
-    CipherCandidate("AES-CBC + HMAC-SHA256-128", 16, 16, 16),
-    CipherCandidate("AES-CBC + HMAC-SHA384-192", 16, 24, 16),
-    CipherCandidate("AES-GCM-16", 8, 16, 4),
-    CipherCandidate("AES-GCM-8", 8, 8, 4),
-    CipherCandidate("AES-CTR + HMAC-SHA1-96", 8, 12, 4),
-    CipherCandidate("3DES-CBC + HMAC-SHA1-96", 8, 12, 8),
-    CipherCandidate("ChaCha20-Poly1305", 8, 16, 4),
+    CipherCandidate(
+        "AES-CBC + HMAC-SHA1-96", 16, 12, 16, EncryptionAlg.AES_CBC, IntegrityAlg.HMAC_SHA1_96
+    ),
+    CipherCandidate(
+        "AES-CBC + HMAC-SHA256-128",
+        16,
+        16,
+        16,
+        EncryptionAlg.AES_CBC,
+        IntegrityAlg.HMAC_SHA256_128,
+    ),
+    CipherCandidate(
+        "AES-CBC + HMAC-SHA384-192",
+        16,
+        24,
+        16,
+        EncryptionAlg.AES_CBC,
+        IntegrityAlg.HMAC_SHA384_192,
+    ),
+    CipherCandidate("AES-GCM-16", 8, 16, 4, EncryptionAlg.AES_GCM_16, IntegrityAlg.NONE),
+    CipherCandidate("AES-GCM-8", 8, 8, 4, EncryptionAlg.AES_GCM_8, IntegrityAlg.NONE),
+    CipherCandidate(
+        "AES-CTR + HMAC-SHA1-96", 8, 12, 4, EncryptionAlg.AES_CTR, IntegrityAlg.HMAC_SHA1_96
+    ),
+    CipherCandidate(
+        "3DES-CBC + HMAC-SHA1-96",
+        8,
+        12,
+        8,
+        EncryptionAlg.TRIPLE_DES_CBC,
+        IntegrityAlg.HMAC_SHA1_96,
+    ),
+    CipherCandidate(
+        "ChaCha20-Poly1305", 8, 16, 4, EncryptionAlg.CHACHA20_POLY1305, IntegrityAlg.NONE
+    ),
 )
 """LLD section 7.2's table, verbatim."""
 
@@ -114,11 +155,50 @@ def confidence_for(survivor_count: int) -> float:
 
 
 def detect(lengths: Sequence[int], quality: CaptureQuality) -> Attribute[str]:
-    """Identify the ESP cipher family, or refuse to.
+    """Identify the ESP cipher *suite*, as a human-readable label.
+
+    This is the display form -- "AES-CBC + HMAC-SHA1-96" -- for evidence blocks
+    and report prose. It is deliberately **not** what goes into a
+    ``SecurityAssociation``: the contract stores encryption and integrity as
+    two separate enum-typed fields, and ``detect_encryption`` and
+    ``detect_integrity`` produce those. Writing this string into
+    ``encryption_alg`` fails validation, which is the type system doing its job.
 
     Returns UNAVAILABLE far more readily than a scoring approach would. That
     is the design: LLD section 7.2 is explicit that a confident wrong cipher
     identification is far more damaging to this product than an admitted gap.
+    """
+    outcome = _sieve(lengths, quality)
+    if isinstance(outcome, Attribute):
+        return Attribute.unavailable(outcome.note or "", evidence=outcome.evidence)
+    matching, evidence = outcome
+    order = ranked(matching)
+
+    return Attribute.inferred(
+        order[0].name,
+        confidence_for(len(matching)),
+        evidence=evidence,
+        note=(
+            f"{len(matching)} of {len(CANDIDATES)} candidate suites are consistent "
+            f"with every observed ESP payload length"
+            + (
+                f"; the others still standing are {', '.join(c.name for c in order[1:])}"
+                if len(order) > 1
+                else ""
+            )
+        ),
+    )
+
+
+def _sieve(
+    lengths: Sequence[int], quality: CaptureQuality
+) -> tuple[list[CipherCandidate], Evidence] | Attribute[object]:
+    """Shared gate and evidence for every field the sieve reports.
+
+    Returns the survivors on success, or the UNAVAILABLE attribute explaining
+    the refusal. One implementation, so ``detect``, ``detect_encryption`` and
+    ``detect_integrity`` cannot drift into disagreeing about whether the
+    capture was usable at all.
     """
     if quality.truncated:
         return Attribute.unavailable(TRUNCATED_NOTE)
@@ -127,7 +207,6 @@ def detect(lengths: Sequence[int], quality: CaptureQuality) -> Attribute[str]:
 
     matching = survivors(lengths)
     distinct = sorted(set(lengths))
-
     evidence = Evidence(
         method="esp_length_lattice",
         measured={
@@ -141,24 +220,80 @@ def detect(lengths: Sequence[int], quality: CaptureQuality) -> Attribute[str]:
             "longest_length": distinct[-1] if distinct else 0,
         },
     )
-
     if not matching:
         return Attribute.unavailable(NO_SURVIVORS_NOTE, evidence=evidence)
+    return matching, evidence
 
-    # Most-constrained first: a 16-byte block survived a stricter test than a
-    # 4-byte one on the same evidence.
-    ranked = sorted(matching, key=lambda c: c.constraint_strength, reverse=True)
+
+def ranked(matching: Sequence[CipherCandidate]) -> list[CipherCandidate]:
+    """Most-constrained first: a 16-byte block survived a stricter test than a
+    4-byte one on the same evidence."""
+    return sorted(matching, key=lambda c: c.constraint_strength, reverse=True)
+
+
+def _detect_field(
+    lengths: Sequence[int], quality: CaptureQuality, *, field: str, label: str
+) -> Attribute[T]:
+    """One field of the winning suite, with a confidence measuring *that field*.
+
+    Ranking picks the answer, exactly as LLD section 7.2 specifies. What is
+    computed per-field is the **confidence**: it counts the distinct values of
+    this field among the survivors rather than the survivors themselves.
+
+    That distinction carries real information, and it usually favours the
+    integrity field. Lengths congruent to 28 mod 4 leave four suites standing --
+    AES-GCM-16, AES-GCM-8, AES-CTR + HMAC-SHA1-96, ChaCha20-Poly1305 -- naming
+    four different ciphers but only two integrity algorithms, because three of
+    them are AEAD and take ``none``. The same evidence has pinned the integrity
+    algorithm down harder than the cipher. Scoring both fields off the survivor
+    count would report one confidence for two genuinely different degrees of
+    certainty.
+    """
+    outcome = _sieve(lengths, quality)
+    if isinstance(outcome, Attribute):
+        return Attribute.unavailable(outcome.note or "", evidence=outcome.evidence)
+    matching, evidence = outcome
+    order = ranked(matching)
+
+    distinct_answers = len({getattr(c, field) for c in matching})
+    total_answers = len({getattr(c, field) for c in CANDIDATES})
+    confidence = 1.0 - (distinct_answers - 1) / (total_answers - 1)
+
+    value: T = getattr(order[0], field)
+    others = sorted({str(getattr(c, field)) for c in order[1:]} - {str(value)})
     return Attribute.inferred(
-        ranked[0].name,
-        confidence_for(len(matching)),
+        value,
+        confidence,
         evidence=evidence,
         note=(
-            f"{len(matching)} of {len(CANDIDATES)} candidate suites are consistent "
-            f"with every observed ESP payload length"
+            f"{len(matching)} of {len(CANDIDATES)} candidate suites are consistent with every "
+            f"observed ESP payload length"
             + (
-                f"; the others still standing are {', '.join(c.name for c in ranked[1:])}"
-                if len(ranked) > 1
-                else ""
+                f", and all of them use this {label}"
+                if distinct_answers == 1
+                else f"; they propose {distinct_answers} different {label}s, "
+                f"the others being {', '.join(others)}"
             )
         ),
     )
+
+
+def detect_encryption(lengths: Sequence[int], quality: CaptureQuality) -> Attribute[EncryptionAlg]:
+    """The ESP encryption algorithm, as ``SecurityAssociation.encryption_alg``.
+
+    Note what this deliberately does not report: the AES **key length**. The
+    sieve tests padding congruence, and AES-128 and AES-256 pad identically, so
+    128 and 256 are indistinguishable here exactly as they are everywhere else
+    in ESP (FR-4.9). ``encryption_keylen`` stays unavailable.
+    """
+    return _detect_field(lengths, quality, field="encryption_alg", label="encryption algorithm")
+
+
+def detect_integrity(lengths: Sequence[int], quality: CaptureQuality) -> Attribute[IntegrityAlg]:
+    """The ESP integrity algorithm, as ``SecurityAssociation.integrity_alg``.
+
+    Answers far less often than ``detect_encryption``. The ICV length is what
+    the sieve measures most directly, but it is also what the AES-CBC rows
+    differ by, so a capture that pins the cipher down often leaves this open.
+    """
+    return _detect_field(lengths, quality, field="integrity_alg", label="integrity algorithm")

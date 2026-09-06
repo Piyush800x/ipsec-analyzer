@@ -99,6 +99,32 @@ parser correctly reporting `UNAVAILABLE` for an IKEv2 lifetime as a mismatch,
 and the obvious way to turn the harness green would be to teach the parser to
 guess.
 
+## Verifying a batch
+
+```bash
+uv run python -m testbed.verify ../dataset/sessions
+```
+
+`verify.py` replays Track A over every capture in the batch and compares the
+result against `labels.json`, field by field. It exits non-zero if anything is
+a `mismatch` or a `fabricated`.
+
+It reports six outcomes, not two:
+
+| Outcome | Meaning | Counts as a defect |
+|---|---|---|
+| `match` | Parser observed the ground-truth value | no |
+| `honest_gap` | Reported `UNAVAILABLE`, and the label agrees it is not observable | no |
+| `inferred` | Reported with `INFERRED` provenance — unscored either way | no |
+| `not_reported` | The parser produced no attribute at all | no, but investigate |
+| `mismatch` | Reported a different value than the ground truth | **yes** |
+| `fabricated` | Reported `OBSERVED` for a field the label says is unobservable | **yes** |
+
+`inferred` is unscored for a specific reason: the testbed configures IKE on CBC
+while ESP carries AEAD, so Track A's same-family inference is *expected* to
+diverge on GCM rows. Scoring those as mismatches would push whoever is chasing
+a green harness toward deleting a correct, honestly-labelled inference.
+
 ## Tests
 
 The Docker-backed tests skip when there is no daemon, no XFRM, or no peer image:

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from analyzer.core.enums import OperatingMode
+from analyzer.core.enums import EncryptionAlg, IntegrityAlg, OperatingMode, Provenance
 from analyzer.core.schema import (
     Attribute,
     CaptureQuality,
@@ -47,7 +47,8 @@ NO_MODEL_NOTE: Final = (
 class TrackBResult:
     """Everything Track B contributes to one SA."""
 
-    encryption_alg_family: Attribute[str]
+    encryption_alg: Attribute[EncryptionAlg]
+    integrity_alg: Attribute[IntegrityAlg]
     operating_mode: Attribute[OperatingMode]
     pfs_enabled: Attribute[bool]
     replay_sane: Attribute[bool]
@@ -95,7 +96,8 @@ class InferenceService:
             spi_first_seen.append((pair.reverse.key.spi, pair.reverse.start_ts))
 
         return TrackBResult(
-            encryption_alg_family=cipher_family.detect(esp_lengths, quality),
+            encryption_alg=cipher_family.detect_encryption(esp_lengths, quality),
+            integrity_alg=cipher_family.detect_integrity(esp_lengths, quality),
             # ML-2 (step 9.9). Honest until a model exists.
             operating_mode=Attribute.unavailable(NO_MODEL_NOTE),
             pfs_enabled=infer_pfs([], [], dh_group),
@@ -119,11 +121,16 @@ class InferenceService:
             "inner_traffic": result.inner_traffic,
         }
 
-        # The cipher family is a *fallback*: it only speaks where Track A could
-        # not, which is the ESP-only capture case (PRD section 7, FR-4.4).
-        if sa.encryption_alg.provenance.value == "unavailable" and (
-            result.encryption_alg_family.value is not None
+        # The cipher sieve is a *fallback*: it only speaks where Track A could
+        # not, which is the ESP-only capture case (PRD section 7, FR-4.4). Both
+        # fields are filled independently, because the sieve routinely
+        # determines one and not the other.
+        for field, inferred in (
+            ("encryption_alg", result.encryption_alg),
+            ("integrity_alg", result.integrity_alg),
         ):
-            updates["encryption_alg"] = result.encryption_alg_family
+            existing: Attribute[object] = getattr(sa, field)
+            if existing.provenance is Provenance.UNAVAILABLE and inferred.value is not None:
+                updates[field] = inferred
 
         return sa.model_copy(update=updates)

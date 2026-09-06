@@ -68,7 +68,8 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-17 | Both reports read correctly to their audience | 10.2, 10.3 | 2026-09-05 | Pass |
 | MT-18 | The offline stack runs with no outbound network | 11.4 | — | **Not run** |
 | MT-19 | Demo rehearsal, three clean runs | 11.6 | — | **Not run** |
-| MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 (Windows only) | Pass (Windows); **Linux not run** |
+| MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 | Pass (both) |
+| MT-21 | A real capture goes through the running API end to end | 6.7, 10.4 | 2026-09-06 | Pass |
 
 ---
 
@@ -806,9 +807,82 @@ WeasyPrint's multi-line installation banner appearing on stdout more than
 once across repeated PDF requests: that means the failed-import cache
 regressed and the dlopen probe is re-running per request.
 
-> Last verified 2026-09-06 · Windows 10 Pro 19045 · **Pass on Windows**;
-> Linux half **not run** — no Linux host available in this environment. The
-> Linux column is what CI exercises on push, minus the manual curl steps.
+> Last verified 2026-09-06 · Windows 10 Pro 19045 **and** Linux 7.0.0-30-generic ·
+> **Pass on both.** The Linux column was confirmed against a running server:
+> `/health` returned `{"status":"ok","database":"up","version":"0.1.0"}`,
+> `?inline=1` returned `200 text/html; charset=utf-8`, and the PDF returned
+> `200 application/pdf`. The WeasyPrint banner did not reappear across repeated
+> requests, so the failed-import cache is holding.
+
+---
+
+## MT-21 — A real capture goes through the running API end to end
+
+**Proves** that the pipeline works against a *running server*, which is not the
+same claim as the test suite passing. It was written because it caught a defect
+the suite could not: every capture with enough ESP length diversity for the
+cipher sieve to answer returned **HTTP 500**, because Track B wrote a suite
+label into an enum-typed contract field and `model_copy(update=...)` does not
+validate. Every unit test asserted on the attribute the sieve returned; none
+carried a successful inference into a validated `Assessment`.
+
+The lesson generalises, so this check stays: **analyse a capture the sieve can
+actually answer.** A capture that degrades exercises the honest-gap paths and
+nothing else, and those are the paths already covered.
+
+```bash
+cd backend && mkdir -p data && uv run alembic upgrade head
+uv run uvicorn analyzer.api.main:create_app --factory --port 8000
+```
+
+In a second shell — the payload lengths matter, see below:
+
+```bash
+uv run python -c "
+import sys; sys.path.insert(0, 'tests')
+from pathlib import Path
+from _pcap import DLT_EN10MB, esp_payload, eth_frame, ipv4_packet, write_pcap
+f  = [eth_frame(ipv4_packet('10.0.0.1','10.0.0.2',50,esp_payload(1,i,b'X'*(48+(i%13)*16)))) for i in range(1,200)]
+f += [eth_frame(ipv4_packet('10.0.0.2','10.0.0.1',50,esp_payload(2,i,b'Y'*(48+(i%11)*16)))) for i in range(1,200)]
+write_pcap(Path('/tmp/demo.pcap'), DLT_EN10MB, f)"
+
+curl -s localhost:8000/api/v1/health
+CAP=$(curl -sF file=@/tmp/demo.pcap localhost:8000/api/v1/captures | jq -r .id)
+RUN=$(curl -sX POST localhost:8000/api/v1/captures/$CAP/analyze | jq -r .runId)
+curl -s localhost:8000/api/v1/runs/$RUN | jq '{status, stage, error, assessmentId}'
+AID=$(curl -s localhost:8000/api/v1/runs/$RUN | jq -r .assessmentId)
+curl -s localhost:8000/api/v1/assessments/$AID | jq '.security_associations[0].encryption_alg'
+curl -so exec.pdf -w '%{http_code} %{content_type} %{size_download}\n' \
+  "localhost:8000/api/v1/assessments/$AID/report?format=executive"
+curl -so tech.pdf -w '%{http_code} %{content_type} %{size_download}\n' \
+  "localhost:8000/api/v1/assessments/$AID/report?format=technical"
+```
+
+**Expect**
+
+| | |
+|---|---|
+| run `status` | `succeeded`, `error` null, `assessmentId` populated |
+| `encryption_alg` | `provenance: "inferred"` with a **confidence**, value an `EncryptionAlg` member |
+| `encryption_keylen` | `unavailable` with a note — FR-4.9 holds even when the family is known |
+| both reports | `200 application/pdf`, tens of kilobytes |
+| an unknown assessment id | `application/problem+json`, never a bare `{"detail": ...}` |
+
+**Watch for** a `status: failed` whose `error.detail` mentions *validation* —
+that is this check's original quarry, and it means something upstream is
+writing a value the contract does not accept. Also watch the `stage` field on a
+failure: `ingest` here meant the whole document failed validation at the end,
+not that reading the pcap broke.
+
+**Note** the run completes with Track A unavailable unless `tshark` is on
+`PATH`; the log says so explicitly. That is the honest degradation, not a
+failure, but it does mean this check does not exercise Track A.
+
+> Last verified 2026-09-06 · Linux, SQLite, no tshark · **Pass.** 398-packet
+> 78 KB capture. Run reached `succeeded`; score 100 `strong` (nothing was proven
+> wrong, so nothing was deducted); executive report 12,918 bytes, technical
+> 32,042 bytes; unknown id returned RFC 9457. Before the fix, this exact
+> sequence returned `status: failed` with two `Assessment` validation errors.
 
 ---
 

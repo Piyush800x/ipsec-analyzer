@@ -100,11 +100,18 @@ nobody is fighting over a shared schema while migrations are still churning.
 ```bash
 cd backend
 mkdir -p data          # SQLite will not create the directory itself
-uv sync
+uv sync --all-groups
 ```
 
-`uv sync` builds `.venv/`, fetches Python 3.11 if needed, and installs from
-`uv.lock`. Then create the schema:
+`uv sync --all-groups` builds `.venv/`, fetches Python 3.11 if needed, and
+installs from `uv.lock`.
+
+> **`--all-groups`, not a bare `uv sync`.** The `testbed` group (`docker`,
+> `jinja2`, `pyyaml`) is not installed by default, and four test modules import
+> it unconditionally — a bare `uv sync` leaves you with collection errors that
+> look like a broken checkout and are not.
+
+Then create the schema:
 
 ```bash
 uv run alembic upgrade head
@@ -119,11 +126,19 @@ uv run python -c "import analyzer; print(analyzer.__version__)"     # 0.1.0
 uv run pytest -q
 ```
 
-Expect **`206 passed, 15 skipped`**. All fifteen skips are expected here: thirteen
-are the PostgreSQL half of the dual-backend database tests, which need a server
-you have not started yet (§7 turns those on and the count becomes
-`219 passed, 2 skipped`); one needs a live Neon URL; one runs inside the
-container image instead.
+Expect **`508 passed, 68 skipped`**. The skips are expected and fall
+into four groups:
+
+| Skipped because | Turn them on with |
+|---|---|
+| The PostgreSQL half of every database *and API* test | §7 — start a local server |
+| Docker-backed testbed tests (Phase 2) | a running Docker daemon |
+| The slow tests (100 MB performance run, 20-iteration leak check) | `-m slow` |
+| The host-`tshark` version check | install tshark, or run it in the image |
+
+A green run on a laptop with no PostgreSQL and no Docker proves rather less
+than the count suggests, which is exactly why the skips are visible rather
+than silently absent.
 
 > **Never `pip install` into this environment.** Add dependencies with
 > `uv add <package>` so `pyproject.toml` and `uv.lock` stay authoritative, and
@@ -136,18 +151,59 @@ container image instead.
 ```bash
 cd ../frontend
 npm ci
-npm run dev
+USE_FIXTURES=1 npm run dev
 ```
 
-Open <http://localhost:3000>. You will see the stock Next.js page — the
-dashboard is Phase 7 and does not exist yet. What this confirms is that the
-toolchain works.
+Open <http://localhost:3000>.
+
+`USE_FIXTURES=1` serves every read from the two demo assessments in
+`src/lib/fixtures/`, so **the whole dashboard renders with the backend not
+running at all**. That is the fastest way to see what the product claims:
+follow either fixture through to its Configuration tab, where every parameter
+shows whether it was observed, inferred, or is honestly undeterminable — which
+is the entire thesis in one screen.
+
+Drop the flag once the API is up (§6) and the same views read live data.
 
 ```bash
 npx tsc --noEmit
 npm run lint
 npm run build
 ```
+
+> `npx tsc --noEmit` fails on a fresh clone with
+> `Cannot find name 'LayoutProps'` until you have run `npm run build` or
+> `npm run dev` once. Next.js 16 generates those route-typed helpers into
+> `.next/types/`, which is git-ignored. It is not a broken checkout.
+
+---
+
+## 5b. The API
+
+```bash
+cd ../backend
+uv run uvicorn analyzer.api.main:create_app --factory --port 8000
+```
+
+`--factory` because `create_app()` builds the engine, session factory, policy
+and job runner itself; there is deliberately no module-level `app` to import,
+so tests can stand one up against a throwaway database.
+
+```bash
+curl localhost:8000/api/v1/health
+curl -F file=@some-capture.pcap localhost:8000/api/v1/captures
+curl -X POST localhost:8000/api/v1/captures/<id>/analyze
+curl -N localhost:8000/api/v1/runs/<run-id>/events      # live SSE progress
+curl -o report.pdf "localhost:8000/api/v1/assessments/<id>/report?format=executive"
+```
+
+Interactive docs at <http://localhost:8000/docs>.
+
+**Track A needs `tshark` on PATH.** Without it the analysis still completes —
+every IKE-derived field comes back `unavailable` with that as the stated
+reason, which is a degraded analysis rather than a failure. Install it
+(`sudo apt-get install -y tshark`) to exercise the parser, and see
+`manualtesting.md` MT-16 for why that is worth doing before trusting Track A.
 
 ---
 
@@ -160,8 +216,15 @@ cd ..
 ./scripts/ci-local.sh
 ```
 
-Expect `CI-LOCAL: PASSED` with ruff, ruff-format, mypy, pytest, `tsc --noEmit`,
-ESLint and `next build` all reporting `PASS`.
+Expect `CI-LOCAL: PASSED` with ruff, ruff-format, mypy, pytest,
+`gen-types --check`, `tsc --noEmit`, ESLint and `next build` all reporting
+`PASS`.
+
+`gen-types --check` is the one that surprises people: it regenerates the
+frontend's TypeScript types from the backend's OpenAPI schema and fails if the
+committed file differs. A Pydantic field changed without regenerating breaks
+the build here rather than surfacing as an `undefined` in the browser later.
+Fix it with `./scripts/gen-types.sh` and commit the result.
 
 Keep this in your muscle memory — it is the difference between "works on my
 machine" and "will pass review".
@@ -186,8 +249,8 @@ cd backend && uv run pytest -q          # now runs every DB test twice
 cd .. && ./scripts/pg-dev.sh down
 ```
 
-The count moves from `206 passed, 15 skipped` to `219 passed, 2 skipped`. If it
-does not move, the URL did not take — see the last entry in §8.
+39 of the 68 default skips are the PostgreSQL half, and they turn into passes.
+If the count does not move, the URL did not take — see the last entry in §8.
 
 It listens on **55432**, not 5432, so it cannot collide with a PostgreSQL you
 actually depend on. CI sets `REQUIRE_POSTGRES=1` alongside the URL, which turns
@@ -256,9 +319,27 @@ You are running Alembic through the **pooled** endpoint. Set
 `DATABASE_URL_DIRECT` to the direct one. This failure does not announce itself
 clearly, which is why it is worth recognising by shape.
 
-### `docker: failed to connect to the docker API`
+### `permission denied while trying to connect to the docker API`
 
-Docker Desktop is not running. Start it and wait for the whale icon to settle.
+Not the same as the daemon being down. The socket is `root:docker` mode `0660`,
+so your account has to be in the `docker` group:
+
+```bash
+getent group docker          # are you listed?
+sudo usermod -aG docker "$USER"
+```
+
+**Then start a new login session.** Supplementary groups are fixed when a
+process starts, so `usermod` does nothing for any shell, editor, or agent
+already running — `getent group docker` will list you while `id -nG` in that
+shell still does not, which is the confusing part. Log out and back in, or
+`newgrp docker` for a single shell. There is no way to pick the group up from
+inside an already-running process.
+
+### `docker: failed to connect to the docker API` (no "permission denied")
+
+The daemon is not running. `sudo systemctl start docker`, or on Docker Desktop
+start it and wait for the whale icon to settle.
 
 ### `Version '...' for 'tshark' was not found` during `docker build`
 
@@ -303,11 +384,23 @@ not by the code compiling.
 | **M** | ML | Features, Track B models, calibration, evaluation |
 | **F** | Frontend | Next.js app, dashboard views, reports |
 
-Gate G1 is passed, so all four are unblocked. The frontend and report
-workstreams build against `backend/tests/fixtures/assessment_weak.json` and
-`assessment_strong.json` until the engine exists —
+Gate **G3 — End to end** is passed: a capture goes in, and an assessment comes
+out through ingest → Track A → Track B → assess → persist, visible in the
+dashboard and downloadable as either report.
+
+What is left is what needs a Docker daemon. Phase 8 (the labelled dataset) has
+its generator and its verification harness written but has never been run;
+Phase 9's learned components (9.5–9.12) wait on that dataset, and
+`backend/models/` is honestly empty in the meantime. Phase 11's remaining steps
+— the PostgreSQL CI run, the offline-stack rehearsal, the frozen demo captures
+— are gated the same way. [CHANGELOG.md](CHANGELOG.md) records per phase what
+was demonstrated and what was not.
+
+The frontend and the report templates render against
+`backend/tests/fixtures/assessment_weak.json` and `assessment_strong.json` —
 [their README](backend/tests/fixtures/README.md) explains which properties of
-those files are deliberate.
+those files are deliberate, and why `model_versions` names models that do not
+exist.
 
 Before your first commit, read [CLAUDE.md](CLAUDE.md). The conventions there —
 UUIDv7 keys, UTC-aware timestamps, `snake_case` in the database, `sa.JSON` never
