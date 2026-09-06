@@ -10,6 +10,7 @@ three-file layout (also see CHANGELOG.md).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, TypeVar
@@ -17,12 +18,20 @@ from typing import Final, TypeVar
 from analyzer.core.enums import AuthMethod, EncryptionAlg, IkeExchangeMode, IkeVersion, PrfAlg
 from analyzer.core.schema import Attribute, Evidence, SecurityAssociation
 from analyzer.ingest.flow import Flow, SAPair
+from analyzer.ingest.reader import PacketRecord
 from analyzer.track_a.ike_parser import (
+    ExchangeSizes,
     IkeNegotiation,
     build_negotiations,
+    exchange_sizes,
     parse_isakmp_json,
     run_tshark,
 )
+
+_NAT_EVIDENCE_PACKETS: Final = 5
+"""How many packet indices back the NAT-T observation. Encapsulation is a
+property every packet in the flow shares, so a handful is a citation rather
+than a list -- and step 5.8 caps evidence anyway."""
 
 CORRELATION_WINDOW_S: Final = 30.0
 """How long after an IKE negotiation completes a Child SA's first packet may
@@ -106,6 +115,41 @@ _NO_NEGOTIATION_NOTE: Final = (
 _T = TypeVar("_T")
 
 
+def _nat_attribute(
+    packets: Sequence[PacketRecord], negotiation: IkeNegotiation | None
+) -> Attribute[bool]:
+    """Whether NAT traversal is in use, from UDP/4500 encapsulation. FR-3.6.
+
+    **A deliberate narrowing of the contract, recorded in CHANGELOG.md as a
+    deviation.** ``schema.py`` and LLD section 6 table both define this field
+    as "UDP/4500 encapsulation, *or* NAT_DETECTION notify payloads". Reading
+    that disjunction literally reports NAT traversal for every IKEv2 tunnel
+    ever captured: RFC 7296 section 3.10.1 requires NAT_DETECTION_SOURCE_IP
+    and NAT_DETECTION_DESTINATION_IP in every IKE_SA_INIT, so strongSwan sends
+    them whether or not a NAT exists. The pilot batch proved it -- both
+    reference tunnels, on a flat /24 with no NAT anywhere, reported
+    ``nat_traversal: true`` as an OBSERVED fact.
+
+    The notify payloads say the peers *looked* for a NAT. Only the switch to
+    UDP/4500 says they *found* one, and RFC 3948 makes that switch mandatory
+    when they do, which makes encapsulation both necessary and sufficient. So
+    encapsulation is the observation and the notifies are demoted to the note,
+    where "discovery ran and found nothing" is worth saying but is not the
+    answer to the question the field asks.
+    """
+    encapsulated = any(packet.udp_encapsulated for packet in packets)
+    evidence = Evidence(
+        method="udp_4500_encapsulation",
+        packet_indices=[p.index for p in packets[:_NAT_EVIDENCE_PACKETS]],
+    )
+    if encapsulated:
+        return Attribute.observed(True, evidence=evidence)
+
+    discovery = negotiation is not None and negotiation.nat_detected
+    ran = "NAT discovery payloads were exchanged but no NAT was found" if discovery else None
+    return Attribute.observed(False, evidence=evidence, note=ran)
+
+
 def _ike_family_attribute(
     value: _T | None, negotiation: IkeNegotiation | None, field: str
 ) -> Attribute[_T]:
@@ -174,7 +218,6 @@ def assemble_security_association(
         lifetime_attr: Attribute[int] = Attribute.unavailable(_NO_NEGOTIATION_NOTE)
         auth_attr = Attribute.unavailable(_NO_NEGOTIATION_NOTE)
         esn_attr: Attribute[bool] = Attribute.unavailable(_NO_NEGOTIATION_NOTE)
-        nat_attr: Attribute[bool] = Attribute.unavailable(_NO_NEGOTIATION_NOTE)
     else:
         dh_group_attr = (
             Attribute.observed(negotiation.dh_group, evidence=_ike_evidence(negotiation))
@@ -226,7 +269,10 @@ def assemble_security_association(
                 "and is not observable from this capture (LLD section 7.5)"
             )
         )
-        nat_attr = Attribute.observed(negotiation.nat_detected, evidence=_ike_evidence(negotiation))
+    # Deliberately outside the negotiation branch: UDP/4500 encapsulation is a
+    # property of the ESP packets themselves, so an ESP-only capture with no
+    # IKE in it can still answer this one definitively.
+    nat_attr = _nat_attribute(packets, negotiation)
 
     encryption_alg = negotiation.encryption_alg if negotiation else None
     encryption_keylen = negotiation.encryption_keylen if negotiation else None
@@ -294,10 +340,25 @@ def run_track_a(
 ) -> list[SecurityAssociation]:
     """Steps 4.1-4.8, end to end: a capture and its assembled SA pairs in,
     one ``SecurityAssociation`` per pair out."""
+    return run_track_a_full(pcap_path, sa_pairs, tshark_bin=tshark_bin)[0]
+
+
+def run_track_a_full(
+    pcap_path: Path, sa_pairs: list[SAPair], *, tshark_bin: str = "tshark"
+) -> tuple[list[SecurityAssociation], list[ExchangeSizes]]:
+    """``run_track_a``, plus the exchange sizes Track B's PFS inference needs.
+
+    A second return value rather than a second tshark run: the sizes come off
+    the same parsed messages, and shelling out twice over a 100 MB capture to
+    read a field already in hand would be the expensive way to keep a signature
+    tidy. ``run_track_a`` stays as it was for every caller that does not need
+    them.
+    """
     raw_packets = run_tshark(pcap_path, tshark_bin=tshark_bin)
     messages = parse_isakmp_json(raw_packets)
     negotiations = build_negotiations(messages)
-    return [
+    security_associations = [
         assemble_security_association(pair, correlate_negotiation(pair.forward, negotiations))
         for pair in sa_pairs
     ]
+    return security_associations, exchange_sizes(messages)

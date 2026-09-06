@@ -16,35 +16,45 @@ from __future__ import annotations
 import random
 
 from testbed.peers import PeerHandle
-from testbed.traffic.base import quote, run_for, with_listener
+from testbed.traffic.base import bind_address, host_for_url, quote, run_for, with_listener
 
 PORT = 8080
 RESOURCE_BYTES = (1_024, 8_192, 65_536, 262_144)
-PAGE_ASSETS = 5
-"""Requests per simulated page view, issued back to back before the think time."""
+PAGE_ASSETS_CHOICES = (3, 5, 8)
+"""Requests per simulated page view, issued back to back before the think time.
 
-THINK_S = (0.8, 3.5)
+Varied per run (step 8.3): a page is a burst of requests followed by a pause,
+and how many requests make up the burst is exactly the kind of detail that
+differs between two real browsing sessions without either stopping being web
+traffic."""
+
+THINK_CHOICES = ((0.8, 3.5), (0.4, 1.8), (1.5, 6.0))
+"""Think-time ranges: attentive clicking through to slow reading. The burst-then-
+pause shape -- what separates web from the steady classes -- is preserved by
+every one of them."""
 
 
-async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None:
+async def generate(left: PeerHandle, right: PeerHandle, duration_s: int, seed: int) -> None:
     """Fetch pages from a server on ``right`` for ``duration_s``."""
     sizes = " ".join(str(n) for n in RESOURCE_BYTES)
     serve = (
         "sh -c 'mkdir -p /srv/web && cd /srv/web && "
         f"for n in {sizes}; do head -c $n /dev/urandom > $n.bin; done && "
-        f"python3 -m http.server {PORT} --bind 0.0.0.0'"
+        f"python3 -m http.server {PORT} --bind {bind_address(right.traffic_addr)}'"
     )
 
     async def fetch() -> None:
-        rng = random.Random(0xC0FFEE)
-        base = f"http://{right.traffic_addr}:{PORT}"
+        rng = random.Random(seed)
+        page_assets = rng.choice(PAGE_ASSETS_CHOICES)
+        think_range = rng.choice(THINK_CHOICES)
+        base = f"http://{host_for_url(right.traffic_addr)}:{PORT}"
         script_lines = []
         elapsed = 0.0
         while elapsed < duration_s:
-            for _ in range(PAGE_ASSETS):
+            for _ in range(page_assets):
                 resource = rng.choice(RESOURCE_BYTES)
                 script_lines.append(f"curl -s -o /dev/null {base}/{resource}.bin")
-            think = rng.uniform(*THINK_S)
+            think = rng.uniform(*think_range)
             script_lines.append(f"sleep {think:.2f}")
             # A page view costs roughly its think time; the transfers themselves
             # are near-instant on a bridge network.

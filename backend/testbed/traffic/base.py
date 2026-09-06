@@ -41,7 +41,7 @@ from testbed.peers import PeerHandle
 
 log = logging.getLogger(__name__)
 
-Generator = Callable[[PeerHandle, PeerHandle, int], Awaitable[None]]
+Generator = Callable[[PeerHandle, PeerHandle, int, int], Awaitable[None]]
 
 SETTLE_S: Final = 1.0
 """Grace period after starting a listener before the sender starts.
@@ -123,17 +123,65 @@ async def with_listener(
         await process.stop()
 
 
+def quote(value: str) -> str:
+    return shlex.quote(value)
+
+
+def is_ipv6(addr: str) -> bool:
+    """Whether *addr* is an IPv6 literal.
+
+    A colon is sufficient and unambiguous here: every address the testbed hands
+    a generator is a bare literal from ``SessionConfig.addressing``, never a
+    hostname and never a host:port pair.
+    """
+    return ":" in addr
+
+
+def host_for_url(addr: str) -> str:
+    """*addr* as it must appear inside a URL: bracketed when it is IPv6.
+
+    ``http://fd00:10:10::3:8080`` is not a URL with a port -- it is a parse
+    error, or worse, silently the wrong host. Every generator that builds a
+    URL or a ``host:port`` string goes through this, because the failure it
+    prevents is invisible: the command exits non-zero, ``run_for`` swallows it,
+    and the session is recorded as successful with an empty capture.
+    """
+    return f"[{addr}]" if is_ipv6(addr) else addr
+
+
+def bind_address(peer_addr: str) -> str:
+    """The wildcard address a listener must bind for *peer_addr*'s family.
+
+    ``0.0.0.0`` is IPv4-only. Every listener in the testbed bound it, so on an
+    IPv6 session the client connected to ``fd00:...`` and found nothing
+    listening -- silently, because ``run_for`` swallows the failure. That is
+    what made every IPv6 row of the pilot batch an empty capture wearing a
+    traffic label.
+    """
+    return "::" if is_ipv6(peer_addr) else "0.0.0.0"
+
+
+def ping_command(source: str, target: str, *, count: int, interval: float, size: int) -> str:
+    """A ping command for either address family.
+
+    iputils' ``ping`` dispatches on the address it is given, but ``-I`` with an
+    IPv6 source needs ``-6`` to be unambiguous, and being explicit costs
+    nothing.
+    """
+    family = "-6" if is_ipv6(target) else "-4"
+    return f"ping {family} -c {count} -i {interval} -s {size} -I {quote(source)} {quote(target)}"
+
+
 def udp_sink(port: int) -> str:
     """A command that swallows UDP on ``port`` for as long as it runs.
 
     Present so that a one-directional media stream does not provoke a matching
     stream of ICMP unreachables back down the tunnel.
+
+    ``-6`` is not passed: busybox nc binds the wildcard address, which accepts
+    both families, and a v6-only bind would break every IPv4 session.
     """
     return f"sh -c 'while true; do nc -u -l -p {port} >/dev/null 2>&1; done'"
-
-
-def quote(value: str) -> str:
-    return shlex.quote(value)
 
 
 def registry() -> dict[TrafficClass, Generator]:
@@ -162,8 +210,19 @@ async def generate_traffic(
     right: PeerHandle,
     traffic_class: TrafficClass,
     duration_s: int,
+    seed: int,
 ) -> None:
-    """Dispatch to the generator for ``traffic_class``."""
+    """Dispatch to the generator for ``traffic_class``.
+
+    *seed* is what makes a second run of the same configuration a second
+    *session* rather than a copy of the first. Step 8.3 needs several traffic
+    runs per configuration to reach PRD section 9.3's 200, and 62 sampled
+    configurations replayed with identical generator parameters would be 62
+    distinct feature rows and 138 duplicates of them -- a dataset that counts
+    to 200 without knowing 200 things. Every generator draws its own
+    within-class parameters from this, so the runs differ in what a classifier
+    reads while staying unmistakably the same traffic class (MT-13).
+    """
     generator = registry()[traffic_class]
-    log.info("generating %s traffic for %ss", traffic_class.value, duration_s)
-    await generator(left, right, duration_s)
+    log.info("generating %s traffic for %ss (seed %d)", traffic_class.value, duration_s, seed)
+    await generator(left, right, duration_s, seed)

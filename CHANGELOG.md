@@ -17,6 +17,308 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Fixed — Track A observed *nothing* on real captures, and its tests could not tell
+
+The single most serious defect this project has had. Phase 4 was written with
+no Docker and no tshark, so `ike_parser.py` guessed tshark's ISAKMP JSON field
+names from documented `isakmp.*` display-filter names. Every structural guess
+was wrong. The parser ran cleanly, raised nothing, and returned an empty
+negotiation list for every capture — so every ESP flow came back
+`no IKE negotiation in this capture correlates to this SA`, and *every*
+Track A field was UNAVAILABLE with a plausible-sounding reason.
+
+The tests passed throughout, because `tests/_tshark_json.py` built its fixtures
+from the same guesses. Parser and fixtures agreed with each other and neither
+agreed with tshark.
+
+Found by running the pilot batch's first real capture through the pinned tshark
+(4.4.18) rather than through the test suite.
+
+**What tshark actually emits**, now read off real output rather than inferred:
+
+| Phase 4 assumed | tshark 4.4.18 emits |
+|---|---|
+| `isakmp.sa.proposals` / `isakmp.sa.proposal` / `isakmp.tf` container keys | no container keys at all — payloads are repeated `isakmp.typepayload` (a type number) and `isakmp.typepayload_tree` (its contents), aligned by position and nested recursively |
+| `isakmp.tf.attr` for both IKE versions | `isakmp.ike.attr` (IKEv1) and `isakmp.ike2.attr` (IKEv2) |
+| `isakmp.tf.id` | `isakmp.tf.id.encr` / `.prf` / `.integ` / `.dh` / `.esn` (IKEv2), `isakmp.trans.id` (IKEv1) |
+| `isakmp.init_spi` / `isakmp.icookie` | `isakmp.ispi` / `isakmp.rspi`, as colon-separated octets |
+| `isakmp.version` is a major version | the packed byte `0x20` — read as an integer it is 32, so **every IKEv2 capture was classified as IKEv1** and then searched for IKEv1 attributes that were not there |
+| attribute values are decimal | colon-separated octets (`00:05`, `00:01:73:40`) |
+| NAT detection is notify 16406/16407 | 16388/16389 (RFC 7296 §3.10.1) — the old pair matches nothing, so `nat_detected` was unreachable |
+
+`tests/_tshark_json.py` was rebuilt from that output. Its builders now take a
+neutral description of a message and render it in the dialect matching the IKE
+version, so a test says "an IKEv1 aggressive-mode proposal offering 3DES"
+without restating tshark's spelling — and a fixture cannot drift into a shape
+only the parser believes in.
+
+**Done when — Track A reproduces `labels.json`.** Demonstrated on both PRD §16
+reference tunnels, verified inside the backend image against the pinned tshark:
+
+```
+2 sessions verified
+  match          8
+  honest_gap     6
+  inferred       5
+  not_reported   2
+
+PASS
+```
+
+Before the fix the same two captures gave `match 0`, `not_reported 9`.
+
+### Fixed — `nat_traversal` was OBSERVED true on tunnels with no NAT
+
+A narrowing of the contract, and a deliberate deviation recorded below.
+`schema.py` and LLD §6 both define the field as "UDP/4500 encapsulation, **or**
+NAT_DETECTION notify payloads". Read literally that reports NAT traversal for
+every IKEv2 tunnel ever captured: RFC 7296 §3.10.1 *requires* the
+NAT_DETECTION notifies in every IKE_SA_INIT, so strongSwan sends them whether
+or not a NAT exists. Both reference tunnels — on a flat /24 with no NAT
+anywhere — reported `nat_traversal: true` as an OBSERVED fact.
+
+The notifies say the peers *looked* for a NAT. Only the switch to UDP/4500 says
+they *found* one, and RFC 3948 makes that switch mandatory when they do. So
+encapsulation is now the observation, and the discovery having run is demoted
+to the note. `PacketRecord.udp_encapsulated` carries the signal from ingest,
+where it was previously discarded — UDP-encapsulated ESP was recorded as plain
+`esp`, indistinguishable from the real thing.
+
+The field is now answerable on an ESP-only capture with no IKE in it at all,
+which it was not before.
+
+### Fixed — the testbed's ground truth disagreed with its own wire by 10%
+
+`negotiated_lifetime_s` came back 95040 against a `labels.json` expecting
+86400: strongSwan's `over_time` defaults to 10% of `rekey_time`, and IKEv1 puts
+the *hard* lifetime on the wire. Track A was reading it correctly; the label
+was wrong.
+
+Fixed in `swanctl.conf.j2` (`over_time = 0s`, alongside the `rand_time = 0s`
+that was already there for the same reason) rather than by teaching the label
+about strongSwan's arithmetic — the configured value should be the negotiated
+value, which is what the ground truth claims it is. `over_time` is accepted on
+the connection only; a child block carrying it fails the whole connection with
+`unknown option: over_time`, which is verified empirically rather than assumed.
+
+### Added — key lengths that the cipher fixes rather than negotiates
+
+`encryption_keylen` was UNAVAILABLE for every 3DES tunnel, because IKEv1 3DES
+carries no key-length attribute — there is nothing to negotiate. Reporting
+"unknown" for a value that is not unknown is the mirror image of a fabricated
+value, and `EncryptionAlg`'s own docstring already says these two ciphers'
+lengths are fixed by the algorithm. `transforms.FIXED_KEY_LENGTH_BITS` supplies
+168 for 3DES-CBC and 56 for DES-CBC (56 rather than 64: the parity bits are not
+key material, and 64 would overstate the weakest cipher in the matrix). The
+attribute always wins when present, so this can never overwrite an observation.
+
+Deliberately limited to those two. The AEAD members are excluded even though
+they are commonly deployed at one size: their IANA transform IDs do not pin a
+key length, and FR-4.9 is about exactly that.
+
+### Fixed — every IPv6 session in the matrix produced an empty capture
+
+Half the sampled matrix is IPv6. Every one of those sessions brought its tunnel
+up, generated nothing at all, and was recorded as a complete session whose
+`labels.json` said it contained 180 seconds of the traffic class it was
+sampled for. The captures held 8 to 11 packets: the IKE exchange and the
+DELETE, and no ESP.
+
+Found by counting scorable windows per class in the pilot batch. Every IPv6
+row had zero.
+
+Every traffic generator built IPv4-only command lines, and several distinct
+faults were stacked on top of each other:
+
+| Generator | Fault |
+|---|---|
+| all listeners | bound `0.0.0.0`, which is IPv4-only, so the client connected to `fd00:...` and found nothing there |
+| web, email | `http://fd00:10:10::3:8080` — an IPv6 literal in a URL needs brackets or it is not a URL with a port |
+| voip, video | same, in `rtp://` |
+| icmp | `ping` with an IPv6 `-I` source and no `-6` |
+| filexfer | `iperf3 --client <v6 literal>` resolves as IPv4 without `-6` |
+| email | swaks refuses IPv6 with "requires IO::Socket::INET6" — it tests for that module by name and will not use `IO::Socket::IP`, which the image had |
+| email | with that module installed, `IO::Socket::INET6` then failed with "Bad protocol 'tcp'": debian-slim ships no `/etc/protocols`, and `netbase` provides it |
+
+`traffic/base.py` gained `is_ipv6`, `host_for_url`, `bind_address` and
+`ping_command`, and every generator goes through them. `Dockerfile.peer` gained
+`libio-socket-inet6-perl` and `netbase`, both there solely so swaks can reach an
+IPv6 server. All seven classes verified generating real traffic over IPv6.
+
+### Added — a session that carried no traffic now fails instead of being labelled
+
+The reason the above was invisible for a whole phase. `run_for` wraps every
+generator command in `|| true`, deliberately, because several of the tools exit
+non-zero in normal operation — and the cost is that a command line that fails
+outright looks exactly like one that worked.
+
+`run_session` now counts ESP packets before writing the session and refuses
+below `max(20, duration_s // 4)`. Messaging, the sparsest class in the matrix
+at roughly one packet per second, clears that at every duration; a tunnel that
+carried nothing but its own negotiation cannot clear it at any. The check
+earned itself immediately, refusing a 25-second messaging session during the
+concurrency tests.
+
+**A capture labelled as traffic it does not contain is worse than a failed
+session**: it is training data that teaches a classifier the wrong thing, and
+nothing downstream can tell.
+
+### Added — step 8.3 can run as concurrent shards
+
+`--shard I/N` splits the configuration list so several batches can generate
+disjoint slices at once. Interleaved rather than contiguous, so no shard draws
+all the IPv6 rows and finishes hours after the others.
+
+Two things had to be fixed before that was possible, and neither was obvious
+until three shards were actually running:
+
+- **Every session created its Docker network on the same subnet.** The second
+  concurrent session got `invalid pool request: Pool overlaps with other one on
+  this address space` and failed, as did every session after it.
+  `PeerAddressing.offset()` gives each shard its own outer subnet
+  (`10.10.<i>.0/24`, `fd00:10:10:<i>::/64`); index 0 is unchanged, so a
+  single-process run and every existing manifest behave exactly as before. The
+  *protected* subnets behind each gateway are deliberately **not** offset — they
+  live in their own network namespaces and cannot collide, and holding them
+  fixed keeps the inner traffic identical across shards, so a shard index is
+  not something a classifier could learn.
+- **A failure in one shard destroyed the others' work.** The per-failure
+  cleanup called `prune_orphans()` unrestricted, which force-removes every
+  container carrying the testbed label — including the live peers of the other
+  two shards, which would then fail, prune in turn, and cascade. `prune_orphans`
+  now takes a session, and the batch names the session it is cleaning up after.
+  The startup sweep, which genuinely cannot tell an orphan from a sibling, is
+  skipped entirely when sharded.
+
+Each shard also keeps its own manifest (`manifest-I-of-N.json`), because one
+shared file rewritten after every session by three processes would have each
+erasing the other two's record of what had completed.
+
+### Added — repeat runs that are actually different sessions
+
+PRD §9.3 wants at least 200 sessions; the pairwise sample is 62
+configurations. `with_repeats` expands each configuration into *N* traffic
+runs, and `--repeats 4` reaches 248.
+
+The point of the step is that those repeats must not be copies. Only the
+messaging generator was seeded, and it was seeded with a constant — every other
+generator produced byte-identical traffic on every run, so 248 sessions would
+have been 62 distinct feature rows and 186 duplicates of them: a dataset that
+counts to 200 without knowing 200 things.
+
+`SessionConfig.seed` now reaches the generators, each repeat gets its own, and
+every generator draws within-class parameters from it: ICMP its rate and sizes,
+web its burst length and think time, VoIP its packetisation interval (20/30/40
+ms, which moves both packet rate and size), video its resolution and bitrate,
+email its attachment sizes and gaps, file transfer its offered rate. Each
+variant keeps the property that defines its class, so the seven remain as
+separable as MT-13 found them.
+
+VoIP's carrier frequency is deliberately *not* varied: a different sine tone
+through G.711 produces identical packet geometry, so it would be a label the
+features cannot see — variation that looks like diversity in the manifest and
+is not.
+
+### Added — Phase 9, Track B: the learned half
+
+Steps 9.5 through 9.12, which the previous entry recorded as "not performed"
+because they need the Phase 8 dataset. The dataset now exists.
+
+**9.5 Windowing and the split** — `track_b/windows.py`
+- LLD §7.6's fixed 10-second windows at 50% overlap, scored only above 20
+  packets. A window is turned into an `SAPair` covering just its packets and
+  handed to the existing `features.extract`, so a window's vector is computed
+  by exactly the same code as a whole capture's.
+- **Split by configuration, never by window**, which is the step's whole point.
+  Windows overlap by half, so two adjacent ones share half their packets
+  outright; a window-level split puts one in train and the other in test and
+  reports a memory test as an accuracy. It comes out high, which is why nobody
+  questions it.
+- Stricter than the plan asks: a configuration's repeat runs are held together
+  too. They share a tunnel and differ only in traffic parameters, so splitting
+  by session alone would leak the configuration even though no single session
+  spans folds.
+- Deterministic, on a SHA-256 of the configuration name rather than `hash()`,
+  which is salted per process — a split that differed between runs would make
+  "the test set" a thing that existed only in the session that trained the
+  model.
+- Stratified by traffic class, because an unstratified 20% draw over 62
+  configurations routinely leaves a class out of the test fold entirely, and a
+  macro-F1 over a fold missing a class is not PRD §8.4's number.
+
+**9.6 LightGBM baseline, 9.7 CNN** — `track_b/traffic_clf.py`
+- The CNN is LLD §7.6's architecture transcribed without changes. It returns
+  logits, not probabilities: both the training loss and step 9.8's temperature
+  scaling are defined on logits, and a model that softmaxed internally would
+  need it undone in both places.
+- Best-epoch selection uses the *calibration* fold. Choosing an epoch by test
+  macro-F1 is model selection on the test set, and the reported number stops
+  being held out the moment it decides something.
+- Class-weighted loss, because window count per class follows traffic rate: one
+  file-transfer session yields far more scorable windows than one messaging
+  session of equal length, and unweighted that accident of bitrate becomes a
+  prior.
+
+**9.8 Calibration** — `track_b/calibration.py`
+- Temperature scaling for the CNN, isotonic regression per class for LightGBM,
+  both fitted on the disjoint calibration fold.
+- Temperature scaling **cannot change a prediction** — dividing every logit by
+  the same positive number leaves the argmax alone — which is asserted, and is
+  why it is the right tool: a calibration step that also changed answers would
+  make the accuracy figure conditional on it.
+- The isotonic fit is exported as knots and applied at inference with
+  `np.interp`, so a deployment needs no scikit-learn for it. Asserted to
+  reproduce the fitted estimator exactly, because a confidence in a report that
+  differed from the confidence the model was evaluated with would make the
+  committed ECE describe something the deployment does not do.
+
+**9.9 Mode classifier** — `track_b/mode.py`
+- LLD §7.3's four features. The ordering dependency the step requires be
+  documented is in the *signature*: `predict` takes a traffic-class
+  distribution as an argument rather than computing one, so ML-1 must have run
+  first and the cycle cannot be closed backwards by a later edit.
+- Weighted by ML-1's whole distribution rather than its argmax, so an uncertain
+  classification contributes a blurred baseline instead of a confidently wrong
+  one.
+- Scored per *session*, not per window: operating mode is a property of the SA,
+  and per-window scoring would count one tunnel's thirty windows as thirty
+  independent correct answers.
+
+**9.10 Feature attribution** — `track_b/attribution.py`
+- Exact TreeSHAP, from LightGBM's own `pred_contrib=True`. The `shap` package
+  is **not** a dependency: its numba/llvmlite chain does not resolve against
+  this project's numpy on Python 3.11, and it would have been a large
+  dependency added to get a number LightGBM already computes exactly.
+- The CNN's tabular half gets occlusion attribution instead, and says so. It is
+  an approximation of a Shapley value, not one, and calling it TreeSHAP would
+  be dressing a weaker method in a stronger method's name.
+
+**9.11 Inference service** — `track_b/service.py`
+- Loads real artefacts and predicts through them, or reports UNAVAILABLE with
+  `NO_MODEL_NOTE` when the directory is empty. **Both are supported states**:
+  an air-gapped deployment handed the code and not the artefacts runs in the
+  second permanently, and has to produce a correct assessment that is honest
+  about what it could not determine.
+- LightGBM and torch are imported lazily and failures tolerated, because they
+  are the `ml` dependency group and absent from the offline image (step 11.4).
+  An artefact that will not load is logged and treated as absent — it is
+  exactly as informative as no model, and crashing over it would lose the
+  Track A analysis too.
+- `model_versions` is a content hash of the artefact, not a string written
+  beside it, so it cannot fall out of step with the bytes it names.
+- The API loads the *LightGBM* traffic classifier rather than the CNN, even
+  though the CNN scores higher: loading the CNN would make torch a runtime
+  dependency of the offline image, and LightGBM also gives exact TreeSHAP that
+  the CNN can only approximate. `metrics.json` records both so the trade is
+  visible rather than implicit.
+
+**9.4 PFS inference is now actually wired.** The previous entry recorded it as
+implemented but fed empty lists, because Track A did not extract exchange
+sizes. `ike_parser.exchange_sizes` now collects CREATE_CHILD_SA and
+INFORMATIONAL message lengths per endpoint pair off the same parsed messages —
+no second tshark run — and the pipeline hands them to `infer_pfs`.
+
+
 ### Added — step 8.5, ISCXVPN2016 ingestion
 
 `analyzer.dataset.iscx` maps the University of New Brunswick's ISCXVPN2016

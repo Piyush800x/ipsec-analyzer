@@ -213,8 +213,12 @@ def _network_ipam(cfg: SessionConfig) -> docker.types.IPAMConfig:
     """
     pools = [docker.types.IPAMPool(subnet=cfg.addressing.subnet)]
     if cfg.ip is IpVersion.V6:
+        # The v4 pool is offset by the same index as the v6 one. It is never
+        # used for traffic, but the daemon still refuses to create two networks
+        # claiming the same v4 subnet -- so a shared v4 pool would make v6
+        # sessions collide across shards even though their v6 subnets differ.
         pools = [
-            docker.types.IPAMPool(subnet=IPV4.subnet),
+            docker.types.IPAMPool(subnet=IPV4.offset(cfg.address_index).subnet),
             docker.types.IPAMPool(subnet=cfg.addressing.subnet),
         ]
     return docker.types.IPAMConfig(pool_configs=pools)
@@ -227,7 +231,12 @@ def _endpoint_addresses(cfg: SessionConfig, side: Side) -> dict[str, str]:
     regardless, and Docker rejects an endpoint that claims an address from only
     one of a dual-stack network's pools.
     """
-    addresses = {"ipv4_address": IPV4.left if side == "left" else IPV4.right}
+    # Offset by the session's address index, like the pool it must fall inside.
+    # Docker rejects an endpoint whose static address is outside the network's
+    # subnet, with "invalid endpoint settings" -- which is what a shard on a
+    # different subnet gets if this reaches for the unshifted constant.
+    v4 = IPV4.offset(cfg.address_index)
+    addresses = {"ipv4_address": v4.left if side == "left" else v4.right}
     if cfg.ip is IpVersion.V6:
         addresses["ipv6_address"] = cfg.addressing.left if side == "left" else cfg.addressing.right
     return addresses
@@ -377,17 +386,30 @@ async def peer_pair(
                 log.exception("failed to remove network %s", network_name)
 
 
-async def prune_orphans() -> tuple[int, int]:
-    """Remove every testbed container and network left behind.
+async def prune_orphans(session: str | None = None) -> tuple[int, int]:
+    """Remove testbed containers and networks left behind.
 
     A killed process never runs its ``finally``. Returns the counts removed, so
     a caller can report that it had cleaning up to do rather than doing it
     silently.
+
+    *session* restricts the sweep to one session's resources, and passing it is
+    **required whenever another batch might be running.** Unrestricted, this
+    force-removes every container carrying ``TESTBED_LABEL`` -- including the
+    live peers of a concurrent shard (``--shard I/N``), whose session would
+    then fail, prune in turn, and take down the next one. Three shards sharing
+    a Docker daemon would cascade each other to a standstill on the first
+    unrelated failure.
+
+    The unrestricted form stays available and is still what a batch wants
+    *before* it starts, where anything labelled really is an orphan.
     """
     client = _client()
 
     def _prune() -> tuple[int, int]:
         filters: dict[str, Any] = {"label": TESTBED_LABEL}
+        if session is not None:
+            filters["label"] = [f"{TESTBED_LABEL}=1", f"{SESSION_LABEL}={session}"]
         removed_containers = 0
         for container in client.containers.list(all=True, filters=filters):
             try:

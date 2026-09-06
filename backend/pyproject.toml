@@ -39,6 +39,18 @@ testbed = [
     "jinja2>=3.1.6",
     "pyyaml>=6.0.3",
 ]
+# Training only. Deliberately not a runtime dependency: the API loads trained
+# artefacts through analyzer.track_b.service, which needs neither LightGBM nor
+# torch to read one, and putting a 200 MB tensor library in the offline image
+# (step 11.4) to run inference it does not do would be a poor trade.
+# SHAP values come from LightGBM's own `pred_contrib=True` (exact TreeSHAP)
+# rather than the `shap` package, whose numba/llvmlite chain does not resolve
+# against this project's numpy on Python 3.11. See track_b/attribution.py.
+ml = [
+    "lightgbm>=4.5",
+    "scikit-learn>=1.5",
+    "torch>=2.5",
+]
 
 [tool.ipsec-analyzer.external-tools]
 # LLD §6.1: Wireshark's JSON field names change across releases and will silently

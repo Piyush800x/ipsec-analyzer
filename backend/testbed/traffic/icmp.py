@@ -13,24 +13,38 @@ only ICMP case there is.
 
 from __future__ import annotations
 
+import random
+
 from testbed.peers import PeerHandle
-from testbed.traffic.base import quote, run_for
+from testbed.traffic.base import ping_command, run_for
 
-INTERVAL_S = 0.2
-SIZES = (56, 512)
+INTERVAL_CHOICES = (0.1, 0.2, 0.5)
+SIZE_CHOICES = ((56, 512), (64, 1024), (56, 128, 512))
+"""Within-class variation for repeat runs (step 8.3).
+
+ICMP's signature is a fixed-rate exchange of a couple of distinct sizes, and
+every combination here keeps it: the rate stays regular and the size set stays
+small. What moves is the rate itself and which sizes, which is what a repeat
+run needs to contribute a genuinely different feature vector rather than a
+duplicate. Ping's own payload sizes are still exact, so the geometry stays
+crisp rather than smeared."""
 
 
-async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None:
+async def generate(left: PeerHandle, right: PeerHandle, duration_s: int, seed: int) -> None:
     """Ping ``right`` from ``left`` for ``duration_s``."""
-    target = quote(right.traffic_addr)
-    source = quote(left.traffic_addr)
-    slice_s = max(duration_s // len(SIZES), 1)
+    rng = random.Random(seed)
+    interval_s = rng.choice(INTERVAL_CHOICES)
+    sizes = rng.choice(SIZE_CHOICES)
 
-    for size in SIZES:
-        count = max(int(slice_s / INTERVAL_S), 1)
+    target = right.traffic_addr
+    source = left.traffic_addr
+    slice_s = max(duration_s // len(sizes), 1)
+
+    for size in sizes:
+        count = max(int(slice_s / interval_s), 1)
         await run_for(
             left,
-            f"ping -c {count} -i {INTERVAL_S} -s {size} -I {source} {target}",
+            ping_command(source, target, count=count, interval=interval_s, size=size),
             slice_s,
             name=f"icmp-{size}",
         )

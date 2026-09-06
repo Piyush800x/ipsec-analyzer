@@ -268,3 +268,108 @@ def test_adaptation_is_deterministic(tmp_path: Path) -> None:
     assert [f.vector for f in iscx.adapt_capture(path)] == [
         f.vector for f in iscx.adapt_capture(path)
     ]
+
+
+# ===========================================================================
+# Step 9.12: the external evaluation itself
+# ===========================================================================
+
+
+class TestExternalEvaluation:
+    """The evaluation path, exercised on ISCXVPN2016-shaped synthetic captures.
+
+    The real corpus needs a registration form and several gigabytes and has not
+    been downloaded (see CHANGELOG.md). What these tests establish is that the
+    evaluation *runs* and reports what step 9.12 requires it to report -- the
+    gap, the substituted features, and the counts of what could not be mapped.
+    They establish nothing about the model's actual external accuracy, which
+    stays unmeasured until someone points this at the real corpus.
+    """
+
+    def _model(self, tmp_path: Path):  # type: ignore[no-untyped-def]
+        import numpy as np
+
+        from analyzer.track_b.traffic_clf import Matrices, train_lightgbm
+
+        names = sorted(features.extract(_a_pair(tmp_path)).keys())
+        rng = np.random.default_rng(0)
+        x = rng.normal(size=(120, len(names))).astype(np.float32)
+        n_classes = len(TrafficClass)
+        y = np.array([i % n_classes for i in range(120)], dtype=np.int64)
+        matrices = Matrices(
+            tabular=x,
+            sequence=np.zeros((120, 128), dtype=np.float32),
+            y=y,
+            config_names=tuple(str(i) for i in range(120)),
+        )
+        return train_lightgbm(
+            matrices,
+            None,
+            feature_names=names,
+            labels=tuple(sorted(c.value for c in TrafficClass)),
+            num_boost_round=10,
+        )
+
+    def test_it_scores_adapted_captures(self, tmp_path: Path) -> None:
+        from analyzer.track_b.external_eval import evaluate_external
+
+        corpus = tmp_path / "iscx"
+        corpus.mkdir()
+        for name in ("vpn_youtube.pcap", "vpn_voipbuzz.pcap", "browsing.pcap"):
+            _external_capture(corpus / name)
+
+        result = evaluate_external(self._model(tmp_path), corpus)
+
+        assert result["scored"] is True
+        assert result["flows"] > 0
+
+    def test_it_names_the_features_it_had_to_substitute(self, tmp_path: Path) -> None:
+        """The 19 ESP-geometry columns measure a padding rule OpenVPN captures
+        do not have. A score that did not say so would not be interpretable."""
+        from analyzer.track_b.external_eval import evaluate_external
+
+        corpus = tmp_path / "iscx"
+        corpus.mkdir()
+        _external_capture(corpus / "vpn_youtube.pcap")
+
+        result = evaluate_external(self._model(tmp_path), corpus)
+
+        assert result["substituted_features"]
+        assert all("esp_len" in name for name in result["substituted_features"])
+
+    def test_the_gap_is_computed_not_left_to_the_reader(self, tmp_path: Path) -> None:
+        """Step 9.12: "report the gap; do not hide it"."""
+        from analyzer.track_b.external_eval import evaluate_external, report
+
+        corpus = tmp_path / "iscx"
+        corpus.mkdir()
+        _external_capture(corpus / "vpn_youtube.pcap")
+
+        document = report(0.90, evaluate_external(self._model(tmp_path), corpus))
+
+        assert document["gap"] == pytest.approx(0.90 - document["external_macro_f1"])
+        assert "interpretation" in document
+
+    def test_an_unmappable_corpus_says_so_rather_than_scoring_zero(self, tmp_path: Path) -> None:
+        """An empty result must not read as a model that got everything wrong."""
+        from analyzer.track_b.external_eval import evaluate_external, report
+
+        corpus = tmp_path / "iscx"
+        corpus.mkdir()
+        _external_capture(corpus / "tor_something.pcap")
+
+        result = evaluate_external(self._model(tmp_path), corpus)
+
+        assert result["scored"] is False
+        assert result["unmapped"] >= 1
+        assert report(0.9, result)["gap"] is None
+
+
+def _a_pair(tmp_path: Path):  # type: ignore[no-untyped-def]
+    """One adapted flow, used only to read the feature *names* off it.
+
+    Via ``iscx.to_sa_pairs`` rather than ``assemble_flows``: these captures
+    carry no ESP, so the ordinary flow assembler correctly finds nothing in
+    them. That substitution is the adapter's whole purpose.
+    """
+    return iscx.to_sa_pairs(read_packets(_external_capture(tmp_path / "_probe.pcap")).packets)[0]

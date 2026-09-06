@@ -23,6 +23,7 @@ runner to mistake for a completed one.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -42,6 +43,35 @@ PCAP_NAME: Final = "capture.pcap"
 LABELS_NAME: Final = "labels.json"
 
 IKE_FILTER: Final = "udp port 500 or udp port 4500"
+
+ESP_FILTER: Final = "esp or ah"
+
+MIN_ESP_PACKETS: Final = 20
+"""Below this a session did not carry traffic, whatever its label says.
+
+This exists because the traffic generators swallow their own failures --
+``run_for`` wraps every command in ``|| true``, deliberately, because several
+of the tools exit non-zero in normal operation. The cost of that is a
+generator which fails outright looking exactly like one that ran: the tunnel
+comes up, the IKE exchange is captured, the session is recorded as complete,
+and ``labels.json`` says the capture contains 180 seconds of video.
+
+That happened. Every IPv6 row of the pilot batch produced 8-11 packets --
+IKE and nothing else -- because every generator built IPv4-only command lines,
+and the batch counted all of them as successes. A capture labelled ``video``
+containing no video is worse than a failed session: it is training data that
+teaches a classifier the wrong thing, and nothing downstream can tell.
+
+The floor scales with the session so that a short run is not held to a long
+run's standard: ``max(MIN_ESP_PACKETS, duration_s // 4)``. Messaging, the
+sparsest class in the matrix at roughly one packet per second, clears it at
+every duration; a tunnel that carried nothing but its own negotiation -- eight
+to eleven packets, all IKE -- cannot clear it at any."""
+
+
+def _esp_floor(duration_s: int) -> int:
+    return max(MIN_ESP_PACKETS, duration_s // 4)
+
 
 TEARDOWN_DRAIN_S: Final = 2.0
 """How long to let tcpdump drain after the tunnel is torn down.
@@ -70,6 +100,19 @@ class SessionResult:
         return bool(observed["has_ike_delete"])
 
 
+def session_token(cfg: SessionConfig) -> str:
+    """The Docker label a session's containers and network carry.
+
+    Derived from the configuration name rather than random, so that a caller
+    which needs to clean up after a *specific* session -- the batch runner,
+    after a failure -- can name that session's resources without having to have
+    been handed a token by the code that created them. A digest rather than the
+    name itself because Docker label values are unconstrained but network names
+    are not, and the name can be sixty characters of matrix vocabulary.
+    """
+    return hashlib.sha256(cfg.name.encode("utf-8")).hexdigest()[:10]
+
+
 async def run_session(
     cfg: SessionConfig,
     output_dir: Path,
@@ -81,13 +124,13 @@ async def run_session(
     session_dir = output_dir / cfg.name
     pcap_path = session_dir / PCAP_NAME
 
-    async with peer_pair(cfg) as (left, right):
+    async with peer_pair(cfg, session_token=session_token(cfg)) as (left, right):
         capture = await start_tcpdump(left, pcap_path, snaplen=snaplen)
 
         await bring_up_tunnel(left, right, cfg)
         state = await assert_sa_established(left)
 
-        await generate_traffic(left, right, cfg.traffic, cfg.duration_s)
+        await generate_traffic(left, right, cfg.traffic, cfg.duration_s, cfg.seed)
 
         # Counted before the teardown so that the DELETE exchange can be
         # confirmed to have landed inside the capture rather than assumed.
@@ -106,9 +149,21 @@ async def run_session(
         ike_after = await _count_matching(capture, IKE_FILTER)
         log.debug("[%s] IKE packets before=%d after=%d", cfg.name, ike_before, ike_after)
 
+        esp_count = await _count_matching(capture, ESP_FILTER)
         image_versions = await _image_versions(left)
         pcap = await capture.stop()
         packet_count = await capture.packet_count()
+
+    floor = _esp_floor(cfg.duration_s)
+    if esp_count < floor:
+        raise TestbedError(
+            f"[{cfg.name}] the tunnel came up but carried almost nothing: "
+            f"{esp_count} ESP packets over {cfg.duration_s}s of {cfg.traffic.value} "
+            f"traffic (floor is {floor}). The generator failed silently -- "
+            "run_for wraps commands in `|| true`, so a broken command line looks "
+            "exactly like a working one. Writing this session would put a capture "
+            "labelled as traffic it does not contain into the dataset."
+        )
 
     has_delete = ike_after > ike_before
     if not has_delete:

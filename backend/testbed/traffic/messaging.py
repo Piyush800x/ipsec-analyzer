@@ -13,17 +13,23 @@ seeded, so a session replays identically.
 from __future__ import annotations
 
 from testbed.peers import PeerHandle
-from testbed.traffic.base import quote, run_for, with_listener
+from testbed.traffic.base import bind_address, quote, run_for, with_listener
 
 PORT = 5222
-SEED = 0x1D1E
 
 
-async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None:
-    """Exchange messages between the peers for ``duration_s``."""
+async def generate(left: PeerHandle, right: PeerHandle, duration_s: int, seed: int) -> None:
+    """Exchange messages between the peers for ``duration_s``.
+
+    The session seed goes straight through to ``messaging_peer.py``, which
+    already drives its whole timing model from one. This is the only generator
+    that needed no new variation of its own for step 8.3 -- it had the seam,
+    it was just being handed a constant.
+    """
     serve = (
-        f"python3 /usr/local/bin/messaging_peer.py serve --host 0.0.0.0 "
-        f"--port {PORT} --duration {duration_s} --seed {SEED}"
+        f"python3 /usr/local/bin/messaging_peer.py serve "
+        f"--host {bind_address(right.traffic_addr)} "
+        f"--port {PORT} --duration {duration_s} --seed {seed}"
     )
 
     async def send() -> None:
@@ -32,7 +38,7 @@ async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None
             (
                 f"python3 /usr/local/bin/messaging_peer.py send "
                 f"--host {quote(right.traffic_addr)} --port {PORT} "
-                f"--duration {duration_s} --seed {SEED}"
+                f"--duration {duration_s} --seed {seed}"
             ),
             duration_s,
             name="messaging-client",

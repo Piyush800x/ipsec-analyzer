@@ -25,6 +25,8 @@ from analyzer.core.enums import (
 from analyzer.track_a.ike_parser import (
     IKE_EXCHANGE_TYPE_AGGRESSIVE,
     IKE_EXCHANGE_TYPE_MAIN,
+    NOTIFY_NAT_DETECTION_DESTINATION_IP,
+    NOTIFY_NAT_DETECTION_SOURCE_IP,
     TrackAError,
     build_negotiations,
     parse_isakmp_json,
@@ -149,7 +151,10 @@ def test_parse_nat_detection_notify() -> None:
                 version="2.0",
                 exchange_type=IKE_SA_INIT,
                 init_spi="1111111111111111",
-                notify=[notify(16406), notify(16407)],
+                notify=[
+                    notify(NOTIFY_NAT_DETECTION_SOURCE_IP),
+                    notify(NOTIFY_NAT_DETECTION_DESTINATION_IP),
+                ],
             ),
         )
     ]
@@ -157,6 +162,40 @@ def test_parse_nat_detection_notify() -> None:
     (message,) = parse_isakmp_json(raw)
 
     assert message.nat_detected is True
+
+
+def test_nat_detection_notify_types_are_the_rfc_7296_ones() -> None:
+    """Pins the two numbers, because the parser was shipped with the wrong pair.
+
+    Phase 4 used 16406/16407, which are not NAT-detection types in any RFC, so
+    ``nat_detected`` was unreachable and the test above passed anyway -- it
+    asserted the parser agreed with a constant, and both were wrong together.
+    Naming the RFC values literally here is the only way that failure mode
+    cannot come back.
+    """
+    assert NOTIFY_NAT_DETECTION_SOURCE_IP == 16388
+    assert NOTIFY_NAT_DETECTION_DESTINATION_IP == 16389
+
+
+def test_unrelated_notify_is_not_read_as_nat_detection() -> None:
+    raw = [
+        packet(
+            frame_number=1,
+            ts=0.0,
+            src="10.0.0.1",
+            dst="10.0.0.2",
+            isakmp=isakmp_header(
+                version="2.0",
+                exchange_type=IKE_SA_INIT,
+                init_spi="1111111111111111",
+                notify=[notify(16404)],  # MULTIPLE_AUTH_SUPPORTED
+            ),
+        )
+    ]
+
+    (message,) = parse_isakmp_json(raw)
+
+    assert message.nat_detected is False
 
 
 def test_parse_single_proposal_collapses_to_dict_not_list() -> None:
@@ -428,3 +467,100 @@ def test_no_response_yields_selected_none() -> None:
     assert negotiation.selected is None
     assert negotiation.encryption_alg is None
     assert negotiation.resp_spi is None
+
+
+# ===========================================================================
+# Step 9.4's input: exchange sizes for PFS inference
+# ===========================================================================
+
+
+def _sized(exchange_type: int, length: int, *, version: str = "2.0") -> dict:
+    header = isakmp_header(
+        version=version, exchange_type=exchange_type, init_spi="aaaa000000000000"
+    )
+    header["isakmp.length"] = str(length)
+    return packet(frame_number=1, ts=0.0, src="10.0.0.1", dst="10.0.0.2", isakmp=header)
+
+
+def test_exchange_sizes_separate_create_child_from_baseline() -> None:
+    from analyzer.track_a.ike_parser import (
+        IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+        IKE_EXCHANGE_TYPE_INFORMATIONAL,
+        exchange_sizes,
+    )
+
+    messages = parse_isakmp_json(
+        [
+            _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 400),
+            _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 404),
+            _sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80),
+        ]
+    )
+
+    (sizes,) = exchange_sizes(messages)
+
+    assert sizes.create_child == (400, 404)
+    assert sizes.baseline == (80,)
+
+
+def test_exchange_sizes_group_both_directions_together() -> None:
+    """An IKE SA that rekeys itself changes SPI; the exchanges either side of
+    that are the same tunnel's rekeys and belong in one series."""
+    from analyzer.track_a.ike_parser import IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, exchange_sizes
+
+    forward = _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 400)
+    reverse = packet(
+        frame_number=2,
+        ts=1.0,
+        src="10.0.0.2",
+        dst="10.0.0.1",
+        isakmp={
+            **isakmp_header(
+                version="2.0",
+                exchange_type=IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+                init_spi="bbbb000000000000",
+            ),
+            "isakmp.length": "396",
+        },
+    )
+
+    assert len(exchange_sizes(parse_isakmp_json([forward, reverse]))) == 1
+
+
+def test_ikev1_contributes_no_exchange_sizes() -> None:
+    """IKEv1 has no CREATE_CHILD_SA and its Quick Mode rekeys are encrypted, so
+    LLD section 7.4's method does not apply to it at all."""
+    from analyzer.track_a.ike_parser import exchange_sizes
+
+    messages = parse_isakmp_json([_sized(IKE_EXCHANGE_TYPE_MAIN, 400, version="1.0")])
+
+    assert exchange_sizes(messages) == []
+
+
+def test_pfs_is_inferred_from_real_exchange_sizes() -> None:
+    """Step 9.4's Done when, over the parser's own output rather than
+    hand-built size lists: a DH-14 rekey carrying a 256-byte public value is
+    separated from one that does not."""
+    from analyzer.core.enums import Provenance
+    from analyzer.track_a.ike_parser import (
+        IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+        IKE_EXCHANGE_TYPE_INFORMATIONAL,
+        exchange_sizes,
+    )
+    from analyzer.track_b.pfs import infer_pfs
+
+    baseline = [_sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80)]
+    with_ke = parse_isakmp_json(
+        [*baseline, _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 80 + 256 + 40)]
+    )
+    without_ke = parse_isakmp_json([*baseline, _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 80 + 40)])
+
+    on = exchange_sizes(with_ke)[0]
+    off = exchange_sizes(without_ke)[0]
+
+    pfs_on = infer_pfs(on.create_child, on.baseline, 14)
+    pfs_off = infer_pfs(off.create_child, off.baseline, 14)
+
+    assert pfs_on.provenance is Provenance.INFERRED
+    assert pfs_on.value is True
+    assert pfs_off.value is False

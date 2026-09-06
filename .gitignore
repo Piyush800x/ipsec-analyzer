@@ -50,6 +50,22 @@ backend/models/*.pkl
 backend/models/*.joblib
 backend/models/*.onnx
 backend/models/*.pt
+# LightGBM writes its boosters as text, which git would happily swallow.
+backend/models/*.txt
+backend/models/*.meta.json
+backend/models/calibration.json
+
+# The batch logs of a generation run. Several megabytes of per-session INFO
+# lines whose useful content is already summarised in CHANGELOG.md.
+dataset/gen-*.log
+dataset/pilot*.log
+
+# metrics.json, reliability_cnn.json and external_validation.json are NOT
+# ignored, deliberately. They are the *measurements* -- what the models scored
+# and on what -- and they are what docs/model-card.md is generated from. The
+# weights are reproducible from the dataset; the record of what they achieved
+# on a particular held-out fold is not, and losing it would leave a model card
+# nobody could check.
 
 # Editors / OS
 .vscode/

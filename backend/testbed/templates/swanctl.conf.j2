@@ -44,6 +44,16 @@ connections {
         # a labelled dataset should not.
         rand_time = 0s
 
+        # over_time is the gap between rekeying and hard expiry, and it also
+        # defaults to 10% of rekey_time. That matters here for a second reason:
+        # IKEv1 puts the *hard* lifetime on the wire, so a default over_time
+        # makes strongSwan propose 95040s for a configured 86400s and every
+        # label disagrees with every capture by exactly 10%. Verified against a
+        # real aggressive-mode negotiation, which is how the discrepancy was
+        # found (step 8.1). Zero here makes the negotiated value the configured
+        # value, which is what labels.json claims it is.
+        over_time = 0s
+
         local {
             auth = psk
             id = {{ local_id }}
@@ -67,6 +77,12 @@ connections {
 
                 rekey_time = {{ lifetime_s }}s
                 rand_time = 0s
+                {#- No over_time here: strongSwan accepts it on the connection
+                    only, and a child block carrying it fails the whole
+                    connection with "unknown option: over_time". The child's
+                    hard lifetime is proposed inside encrypted Quick Mode and
+                    is unobservable anyway; only rekey_time, which sets the
+                    interval step 9.3 measures, matters here. #}
 
                 # Rekey on time only. A byte- or packet-triggered rekey would
                 # make the observed rekey interval depend on the traffic class,

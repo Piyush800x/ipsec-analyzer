@@ -35,9 +35,9 @@ from pathlib import Path
 from typing import Any, Final
 
 from testbed.config import SessionConfig
-from testbed.orchestrator import LABELS_NAME, PCAP_NAME, run_session
+from testbed.orchestrator import LABELS_NAME, PCAP_NAME, run_session, session_token
 from testbed.peers import preflight, prune_orphans
-from testbed.sampler import load_matrix, sample_configs
+from testbed.sampler import load_matrix, sample_configs, with_repeats
 
 log = logging.getLogger(__name__)
 
@@ -57,8 +57,8 @@ class Manifest:
     started_at: str = ""
 
     @classmethod
-    def load_or_create(cls, output_dir: Path) -> Manifest:
-        path = output_dir / MANIFEST_NAME
+    def load_or_create(cls, output_dir: Path, *, name: str = MANIFEST_NAME) -> Manifest:
+        path = output_dir / name
         if path.is_file():
             raw = json.loads(path.read_text(encoding="utf-8"))
             return cls(
@@ -143,20 +143,39 @@ async def run_batch(
     resume: bool = True,
     stop_on_error: bool = False,
     skip_preflight: bool = False,
+    manifest_name: str = MANIFEST_NAME,
+    prune_before: bool = True,
 ) -> BatchReport:
-    """Run every configuration, recording progress as it goes."""
+    """Run every configuration, recording progress as it goes.
+
+    *manifest_name* exists so that concurrent shards (``--shard I/N``) each keep
+    their own progress file in a shared output directory. One shared manifest
+    would have three processes rewriting the same file after every session,
+    each with only its own third of the picture -- and the last writer would
+    erase the other two shards' records, so a resume after a crash would
+    re-run sessions that had already completed.
+    """
     started = time.monotonic()
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = Manifest.load_or_create(output_dir)
+    manifest = Manifest.load_or_create(output_dir, name=manifest_name)
 
     if not skip_preflight:
         await preflight()
 
     # A previous run killed mid-session leaves containers and a network behind,
     # and a few hundred of those will exhaust the address pools of the daemon.
-    containers, networks = await prune_orphans()
-    if containers or networks:
-        log.info("cleaned up %d orphaned containers and %d networks", containers, networks)
+    #
+    # Skipped when sharded, because this sweep cannot tell an orphan from a
+    # sibling: three shards starting within a second of each other would have
+    # the second and third destroy the first's peers before it had finished
+    # creating them. A sharded run is the one case where something else on this
+    # daemon is legitimately using testbed containers, so it cleans up only
+    # after its own failures (below) and leaves the general sweep to a
+    # single-process run.
+    if prune_before:
+        containers, networks = await prune_orphans()
+        if containers or networks:
+            log.info("cleaned up %d orphaned containers and %d networks", containers, networks)
 
     completed: list[str] = []
     failed: list[str] = []
@@ -178,8 +197,10 @@ async def run_batch(
             if stop_on_error:
                 raise
             # One bad configuration must not leave its containers behind for
-            # the next two hundred sessions to contend with.
-            await prune_orphans()
+            # the next two hundred sessions to contend with -- but the sweep is
+            # scoped to this session, because an unrestricted one would remove
+            # the live peers of every concurrent shard as well.
+            await prune_orphans(session=session_token(cfg))
             continue
 
         completed.append(cfg.name)
@@ -218,6 +239,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--duration", type=int, default=None, help="override the per-session traffic duration"
     )
+    parser.add_argument(
+        "--shard",
+        default=None,
+        metavar="I/N",
+        help=(
+            "run only shard I of N (1-based), so several batches can generate "
+            "disjoint slices of the matrix concurrently. Sessions are "
+            "independent -- each builds its own network and its own pair of "
+            "containers -- so the only shared resource is the Docker daemon. "
+            "Shards are interleaved rather than contiguous, so every shard "
+            "covers the whole matrix rather than one shard getting all the IPv6 "
+            "rows and finishing hours after the others."
+        ),
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help=(
+            "traffic runs per configuration (step 8.3). Each repeat reseeds the "
+            "traffic generators, so the runs differ within their class rather "
+            "than duplicating each other; the tunnel configuration is identical "
+            "across a configuration's repeats by design."
+        ),
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)
 
@@ -228,7 +274,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     for noisy in ("docker", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    configs = sample_configs(load_matrix())
+    configs = with_repeats(sample_configs(load_matrix()), args.repeats)
+    manifest_name = MANIFEST_NAME
+    if args.shard is not None:
+        index, _, count = args.shard.partition("/")
+        configs = configs[int(index) - 1 :: int(count)]
+        manifest_name = f"manifest-{int(index)}-of-{int(count)}.json"
+        # Each shard runs on its own outer subnet. Sessions within a shard are
+        # sequential, so one subnet per shard is enough -- and shard 1 keeps
+        # index 0, which is the addressing every earlier session used.
+        configs = [c.model_copy(update={"address_index": int(index) - 1}) for c in configs]
+        log.info(
+            "shard %s: %d configurations on subnet index %d",
+            args.shard,
+            len(configs),
+            int(index) - 1,
+        )
     if args.duration is not None:
         configs = [cfg.model_copy(update={"duration_s": args.duration}) for cfg in configs]
     if args.limit is not None:
@@ -240,6 +301,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.output_dir,
             resume=not args.no_resume,
             stop_on_error=args.stop_on_error,
+            manifest_name=manifest_name,
+            prune_before=args.shard is None,
         )
     )
     return 0 if report.ok else 1
