@@ -1,0 +1,334 @@
+2026-09-07 10:56:09,319 INFO    analyzer.track_b.windows: hardened-reference: 18 windows (voip)
+2026-09-07 10:56:09,618 INFO    analyzer.track_b.windows: hardened-reference-r2: 18 windows (voip)
+2026-09-07 10:56:09,832 INFO    analyzer.track_b.windows: hardened-reference-r3: 18 windows (voip)
+2026-09-07 10:56:10,056 INFO    analyzer.track_b.windows: hardened-reference-r4: 18 windows (voip)
+2026-09-07 10:56:10,177 INFO    analyzer.track_b.windows: s000-ikev1-aggressive-3des-sha1-dh14-pfs-tunnel-v6-email: 18 windows (email)
+2026-09-07 10:56:10,317 INFO    analyzer.track_b.windows: s000-ikev1-aggressive-3des-sha1-dh14-pfs-tunnel-v6-email-r2: 14 windows (email)
+2026-09-07 10:56:10,549 INFO    analyzer.track_b.windows: s000-ikev1-aggressive-3des-sha1-dh14-pfs-tunnel-v6-email-r3: 19 windows (email)
+2026-09-07 10:56:10,661 INFO    analyzer.track_b.windows: s000-ikev1-aggressive-3des-sha1-dh14-pfs-tunnel-v6-email-r4: 19 windows (email)
+2026-09-07 10:56:10,870 INFO    analyzer.track_b.windows: s001-ikev1-main-3des-sha1-dh14-nopfs-transport-v4-voip: 18 windows (voip)
+2026-09-07 10:56:11,128 INFO    analyzer.track_b.windows: s001-ikev1-main-3des-sha1-dh14-nopfs-transport-v4-voip-r2: 19 windows (voip)
+2026-09-07 10:56:11,304 INFO    analyzer.track_b.windows: s001-ikev1-main-3des-sha1-dh14-nopfs-transport-v4-voip-r3: 18 windows (voip)
+2026-09-07 10:56:11,514 INFO    analyzer.track_b.windows: s001-ikev1-main-3des-sha1-dh14-nopfs-transport-v4-voip-r4: 18 windows (voip)
+2026-09-07 10:56:11,595 INFO    analyzer.track_b.windows: s002-ikev2-3des-sha1-dh14-pfs-transport-v6-icmp: 18 windows (icmp)
+2026-09-07 10:56:11,699 INFO    analyzer.track_b.windows: s002-ikev2-3des-sha1-dh14-pfs-transport-v6-icmp-r2: 19 windows (icmp)
+2026-09-07 10:56:11,774 INFO    analyzer.track_b.windows: s002-ikev2-3des-sha1-dh14-pfs-transport-v6-icmp-r3: 18 windows (icmp)
+2026-09-07 10:56:11,853 INFO    analyzer.track_b.windows: s002-ikev2-3des-sha1-dh14-pfs-transport-v6-icmp-r4: 18 windows (icmp)
+2026-09-07 10:56:11,856 INFO    analyzer.track_b.windows: s003-ikev1-aggressive-aes128-sha1-dh14-pfs-tunnel-v6-messaging: 0 windows (messaging)
+2026-09-07 10:56:11,860 INFO    analyzer.track_b.windows: s003-ikev1-aggressive-aes128-sha1-dh14-pfs-tunnel-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 10:56:11,863 INFO    analyzer.track_b.windows: s003-ikev1-aggressive-aes128-sha1-dh14-pfs-tunnel-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 10:56:11,866 INFO    analyzer.track_b.windows: s003-ikev1-aggressive-aes128-sha1-dh14-pfs-tunnel-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 10:56:15,518 INFO    analyzer.track_b.windows: s004-ikev1-main-aes128-sha1-dh14-pfs-tunnel-v6-filexfer: 18 windows (file_transfer)
+2026-09-07 10:56:22,601 INFO    analyzer.track_b.windows: s004-ikev1-main-aes128-sha1-dh14-pfs-tunnel-v6-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:56:38,158 INFO    analyzer.track_b.windows: s004-ikev1-main-aes128-sha1-dh14-pfs-tunnel-v6-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 10:56:42,226 INFO    analyzer.track_b.windows: s004-ikev1-main-aes128-sha1-dh14-pfs-tunnel-v6-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:56:42,572 INFO    analyzer.track_b.windows: s005-ikev2-aes128-sha1-dh14-nopfs-tunnel-v4-video: 18 windows (video)
+2026-09-07 10:56:43,207 INFO    analyzer.track_b.windows: s005-ikev2-aes128-sha1-dh14-nopfs-tunnel-v4-video-r2: 18 windows (video)
+2026-09-07 10:56:43,963 INFO    analyzer.track_b.windows: s005-ikev2-aes128-sha1-dh14-nopfs-tunnel-v4-video-r3: 18 windows (video)
+2026-09-07 10:56:44,277 INFO    analyzer.track_b.windows: s005-ikev2-aes128-sha1-dh14-nopfs-tunnel-v4-video-r4: 18 windows (video)
+2026-09-07 10:56:45,384 INFO    analyzer.track_b.windows: s006-ikev1-aggressive-aes128gcm16-dh14-pfs-transport-v4-web: 19 windows (web)
+2026-09-07 10:56:45,873 INFO    analyzer.track_b.windows: s006-ikev1-aggressive-aes128gcm16-dh14-pfs-transport-v4-web-r2: 19 windows (web)
+2026-09-07 10:56:47,723 INFO    analyzer.track_b.windows: s006-ikev1-aggressive-aes128gcm16-dh14-pfs-transport-v4-web-r3: 19 windows (web)
+2026-09-07 10:56:49,060 INFO    analyzer.track_b.windows: s006-ikev1-aggressive-aes128gcm16-dh14-pfs-transport-v4-web-r4: 19 windows (web)
+2026-09-07 10:56:50,407 INFO    analyzer.track_b.windows: s007-ikev2-aes128gcm16-dh14-pfs-tunnel-v6-web: 19 windows (web)
+2026-09-07 10:56:50,933 INFO    analyzer.track_b.windows: s007-ikev2-aes128gcm16-dh14-pfs-tunnel-v6-web-r2: 19 windows (web)
+2026-09-07 10:56:52,969 INFO    analyzer.track_b.windows: s007-ikev2-aes128gcm16-dh14-pfs-tunnel-v6-web-r3: 19 windows (web)
+2026-09-07 10:56:54,442 INFO    analyzer.track_b.windows: s007-ikev2-aes128gcm16-dh14-pfs-tunnel-v6-web-r4: 19 windows (web)
+2026-09-07 10:56:54,524 INFO    analyzer.track_b.windows: s008-ikev1-aggressive-aes256-sha256-dh14-nopfs-transport-v4-icmp: 18 windows (icmp)
+2026-09-07 10:56:54,621 INFO    analyzer.track_b.windows: s008-ikev1-aggressive-aes256-sha256-dh14-nopfs-transport-v4-icmp-r2: 19 windows (icmp)
+2026-09-07 10:56:54,682 INFO    analyzer.track_b.windows: s008-ikev1-aggressive-aes256-sha256-dh14-nopfs-transport-v4-icmp-r3: 18 windows (icmp)
+2026-09-07 10:56:54,755 INFO    analyzer.track_b.windows: s008-ikev1-aggressive-aes256-sha256-dh14-nopfs-transport-v4-icmp-r4: 18 windows (icmp)
+2026-09-07 10:56:55,087 INFO    analyzer.track_b.windows: s009-ikev1-main-aes256-sha256-dh14-nopfs-tunnel-v6-video: 18 windows (video)
+2026-09-07 10:56:55,644 INFO    analyzer.track_b.windows: s009-ikev1-main-aes256-sha256-dh14-nopfs-tunnel-v6-video-r2: 18 windows (video)
+2026-09-07 10:56:56,450 INFO    analyzer.track_b.windows: s009-ikev1-main-aes256-sha256-dh14-nopfs-tunnel-v6-video-r3: 18 windows (video)
+2026-09-07 10:56:56,793 INFO    analyzer.track_b.windows: s009-ikev1-main-aes256-sha256-dh14-nopfs-tunnel-v6-video-r4: 18 windows (video)
+2026-09-07 10:56:56,885 INFO    analyzer.track_b.windows: s010-ikev1-main-aes256-sha256-dh14-pfs-tunnel-v6-email: 18 windows (email)
+2026-09-07 10:56:56,987 INFO    analyzer.track_b.windows: s010-ikev1-main-aes256-sha256-dh14-pfs-tunnel-v6-email-r2: 14 windows (email)
+2026-09-07 10:56:57,167 INFO    analyzer.track_b.windows: s010-ikev1-main-aes256-sha256-dh14-pfs-tunnel-v6-email-r3: 19 windows (email)
+2026-09-07 10:56:57,255 INFO    analyzer.track_b.windows: s010-ikev1-main-aes256-sha256-dh14-pfs-tunnel-v6-email-r4: 19 windows (email)
+2026-09-07 10:56:57,460 INFO    analyzer.track_b.windows: s011-ikev2-aes256-sha256-dh14-nopfs-transport-v4-voip: 18 windows (voip)
+2026-09-07 10:56:57,740 INFO    analyzer.track_b.windows: s011-ikev2-aes256-sha256-dh14-nopfs-transport-v4-voip-r2: 18 windows (voip)
+2026-09-07 10:56:57,916 INFO    analyzer.track_b.windows: s011-ikev2-aes256-sha256-dh14-nopfs-transport-v4-voip-r3: 18 windows (voip)
+2026-09-07 10:56:58,124 INFO    analyzer.track_b.windows: s011-ikev2-aes256-sha256-dh14-nopfs-transport-v4-voip-r4: 18 windows (voip)
+2026-09-07 10:57:01,185 INFO    analyzer.track_b.windows: s012-ikev2-aes256-sha256-dh14-pfs-tunnel-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 10:57:07,114 INFO    analyzer.track_b.windows: s012-ikev2-aes256-sha256-dh14-pfs-tunnel-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:57:20,753 INFO    analyzer.track_b.windows: s012-ikev2-aes256-sha256-dh14-pfs-tunnel-v4-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 10:57:24,180 INFO    analyzer.track_b.windows: s012-ikev2-aes256-sha256-dh14-pfs-tunnel-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:57:25,648 INFO    analyzer.track_b.windows: s013-ikev1-aggressive-aes256gcm16-dh14-nopfs-transport-v6-web: 19 windows (web)
+2026-09-07 10:57:26,148 INFO    analyzer.track_b.windows: s013-ikev1-aggressive-aes256gcm16-dh14-nopfs-transport-v6-web-r2: 19 windows (web)
+2026-09-07 10:57:28,204 INFO    analyzer.track_b.windows: s013-ikev1-aggressive-aes256gcm16-dh14-nopfs-transport-v6-web-r3: 19 windows (web)
+2026-09-07 10:57:29,842 INFO    analyzer.track_b.windows: s013-ikev1-aggressive-aes256gcm16-dh14-nopfs-transport-v6-web-r4: 19 windows (web)
+2026-09-07 10:57:29,966 INFO    analyzer.track_b.windows: s014-ikev1-main-aes256gcm16-dh14-nopfs-transport-v4-email: 18 windows (email)
+2026-09-07 10:57:30,095 INFO    analyzer.track_b.windows: s014-ikev1-main-aes256gcm16-dh14-nopfs-transport-v4-email-r2: 14 windows (email)
+2026-09-07 10:57:30,280 INFO    analyzer.track_b.windows: s014-ikev1-main-aes256gcm16-dh14-nopfs-transport-v4-email-r3: 19 windows (email)
+2026-09-07 10:57:30,392 INFO    analyzer.track_b.windows: s014-ikev1-main-aes256gcm16-dh14-nopfs-transport-v4-email-r4: 19 windows (email)
+2026-09-07 10:57:30,468 INFO    analyzer.track_b.windows: s015-ikev1-main-aes256gcm16-dh14-nopfs-tunnel-v4-icmp: 18 windows (icmp)
+2026-09-07 10:57:30,568 INFO    analyzer.track_b.windows: s015-ikev1-main-aes256gcm16-dh14-nopfs-tunnel-v4-icmp-r2: 19 windows (icmp)
+2026-09-07 10:57:30,633 INFO    analyzer.track_b.windows: s015-ikev1-main-aes256gcm16-dh14-nopfs-tunnel-v4-icmp-r3: 18 windows (icmp)
+2026-09-07 10:57:30,713 INFO    analyzer.track_b.windows: s015-ikev1-main-aes256gcm16-dh14-nopfs-tunnel-v4-icmp-r4: 18 windows (icmp)
+2026-09-07 10:57:31,012 INFO    analyzer.track_b.windows: s016-ikev2-aes256gcm16-dh14-nopfs-tunnel-v4-video: 18 windows (video)
+2026-09-07 10:57:31,515 INFO    analyzer.track_b.windows: s016-ikev2-aes256gcm16-dh14-nopfs-tunnel-v4-video-r2: 18 windows (video)
+2026-09-07 10:57:32,442 INFO    analyzer.track_b.windows: s016-ikev2-aes256gcm16-dh14-nopfs-tunnel-v4-video-r3: 18 windows (video)
+2026-09-07 10:57:32,740 INFO    analyzer.track_b.windows: s016-ikev2-aes256gcm16-dh14-nopfs-tunnel-v4-video-r4: 18 windows (video)
+2026-09-07 10:57:32,813 INFO    analyzer.track_b.windows: s017-ikev1-aggressive-3des-sha1-dh19-nopfs-tunnel-v4-icmp: 18 windows (icmp)
+2026-09-07 10:57:32,911 INFO    analyzer.track_b.windows: s017-ikev1-aggressive-3des-sha1-dh19-nopfs-tunnel-v4-icmp-r2: 19 windows (icmp)
+2026-09-07 10:57:32,972 INFO    analyzer.track_b.windows: s017-ikev1-aggressive-3des-sha1-dh19-nopfs-tunnel-v4-icmp-r3: 18 windows (icmp)
+2026-09-07 10:57:33,048 INFO    analyzer.track_b.windows: s017-ikev1-aggressive-3des-sha1-dh19-nopfs-tunnel-v4-icmp-r4: 18 windows (icmp)
+2026-09-07 10:57:33,391 INFO    analyzer.track_b.windows: s018-ikev1-main-3des-sha1-dh19-pfs-transport-v6-video: 18 windows (video)
+2026-09-07 10:57:33,980 INFO    analyzer.track_b.windows: s018-ikev1-main-3des-sha1-dh19-pfs-transport-v6-video-r2: 18 windows (video)
+2026-09-07 10:57:34,830 INFO    analyzer.track_b.windows: s018-ikev1-main-3des-sha1-dh19-pfs-transport-v6-video-r3: 18 windows (video)
+2026-09-07 10:57:35,186 INFO    analyzer.track_b.windows: s018-ikev1-main-3des-sha1-dh19-pfs-transport-v6-video-r4: 18 windows (video)
+2026-09-07 10:57:35,190 INFO    analyzer.track_b.windows: s019-ikev2-3des-sha1-dh19-nopfs-tunnel-v6-messaging: 0 windows (messaging)
+2026-09-07 10:57:35,192 INFO    analyzer.track_b.windows: s019-ikev2-3des-sha1-dh19-nopfs-tunnel-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 10:57:35,195 INFO    analyzer.track_b.windows: s019-ikev2-3des-sha1-dh19-nopfs-tunnel-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 10:57:35,197 INFO    analyzer.track_b.windows: s019-ikev2-3des-sha1-dh19-nopfs-tunnel-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 10:57:35,464 INFO    analyzer.track_b.windows: s020-ikev1-aggressive-aes128-sha1-dh19-nopfs-tunnel-v6-voip: 18 windows (voip)
+2026-09-07 10:57:35,824 INFO    analyzer.track_b.windows: s020-ikev1-aggressive-aes128-sha1-dh19-nopfs-tunnel-v6-voip-r2: 18 windows (voip)
+2026-09-07 10:57:36,078 INFO    analyzer.track_b.windows: s020-ikev1-aggressive-aes128-sha1-dh19-nopfs-tunnel-v6-voip-r3: 18 windows (voip)
+2026-09-07 10:57:36,342 INFO    analyzer.track_b.windows: s020-ikev1-aggressive-aes128-sha1-dh19-nopfs-tunnel-v6-voip-r4: 18 windows (voip)
+2026-09-07 10:57:36,434 INFO    analyzer.track_b.windows: s021-ikev1-main-aes128-sha1-dh19-nopfs-transport-v4-email: 18 windows (email)
+2026-09-07 10:57:36,545 INFO    analyzer.track_b.windows: s021-ikev1-main-aes128-sha1-dh19-nopfs-transport-v4-email-r2: 14 windows (email)
+2026-09-07 10:57:36,725 INFO    analyzer.track_b.windows: s021-ikev1-main-aes128-sha1-dh19-nopfs-transport-v4-email-r3: 19 windows (email)
+2026-09-07 10:57:36,814 INFO    analyzer.track_b.windows: s021-ikev1-main-aes128-sha1-dh19-nopfs-transport-v4-email-r4: 19 windows (email)
+2026-09-07 10:57:39,235 INFO    analyzer.track_b.windows: s022-ikev2-aes128-sha1-dh19-pfs-transport-v6-filexfer: 18 windows (file_transfer)
+2026-09-07 10:57:44,370 INFO    analyzer.track_b.windows: s022-ikev2-aes128-sha1-dh19-pfs-transport-v6-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:57:54,188 INFO    analyzer.track_b.windows: s022-ikev2-aes128-sha1-dh19-pfs-transport-v6-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 10:57:57,087 INFO    analyzer.track_b.windows: s022-ikev2-aes128-sha1-dh19-pfs-transport-v6-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:57:58,602 INFO    analyzer.track_b.windows: s023-ikev2-aes128-sha1-dh19-pfs-tunnel-v6-web: 19 windows (web)
+2026-09-07 10:57:59,099 INFO    analyzer.track_b.windows: s023-ikev2-aes128-sha1-dh19-pfs-tunnel-v6-web-r2: 19 windows (web)
+2026-09-07 10:58:01,479 INFO    analyzer.track_b.windows: s023-ikev2-aes128-sha1-dh19-pfs-tunnel-v6-web-r3: 19 windows (web)
+2026-09-07 10:58:03,565 INFO    analyzer.track_b.windows: s023-ikev2-aes128-sha1-dh19-pfs-tunnel-v6-web-r4: 19 windows (web)
+2026-09-07 10:58:03,947 INFO    analyzer.track_b.windows: s024-ikev1-main-aes128gcm16-dh19-pfs-transport-v4-video: 18 windows (video)
+2026-09-07 10:58:04,599 INFO    analyzer.track_b.windows: s024-ikev1-main-aes128gcm16-dh19-pfs-transport-v4-video-r2: 18 windows (video)
+2026-09-07 10:58:05,405 INFO    analyzer.track_b.windows: s024-ikev1-main-aes128gcm16-dh19-pfs-transport-v4-video-r3: 18 windows (video)
+2026-09-07 10:58:05,771 INFO    analyzer.track_b.windows: s024-ikev1-main-aes128gcm16-dh19-pfs-transport-v4-video-r4: 18 windows (video)
+2026-09-07 10:58:06,939 INFO    analyzer.track_b.windows: s025-ikev2-aes128gcm16-dh19-nopfs-transport-v4-web: 19 windows (web)
+2026-09-07 10:58:07,370 INFO    analyzer.track_b.windows: s025-ikev2-aes128gcm16-dh19-nopfs-transport-v4-web-r2: 19 windows (web)
+2026-09-07 10:58:09,082 INFO    analyzer.track_b.windows: s025-ikev2-aes128gcm16-dh19-nopfs-transport-v4-web-r3: 19 windows (web)
+2026-09-07 10:58:10,430 INFO    analyzer.track_b.windows: s025-ikev2-aes128gcm16-dh19-nopfs-transport-v4-web-r4: 19 windows (web)
+2026-09-07 10:58:10,439 INFO    analyzer.track_b.windows: s026-ikev1-aggressive-aes256-sha256-dh19-pfs-transport-v6-messaging: 0 windows (messaging)
+2026-09-07 10:58:10,441 INFO    analyzer.track_b.windows: s026-ikev1-aggressive-aes256-sha256-dh19-pfs-transport-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 10:58:10,444 INFO    analyzer.track_b.windows: s026-ikev1-aggressive-aes256-sha256-dh19-pfs-transport-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 10:58:10,445 INFO    analyzer.track_b.windows: s026-ikev1-aggressive-aes256-sha256-dh19-pfs-transport-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 10:58:10,540 INFO    analyzer.track_b.windows: s027-ikev1-main-aes256-sha256-dh19-pfs-transport-v6-email: 18 windows (email)
+2026-09-07 10:58:10,653 INFO    analyzer.track_b.windows: s027-ikev1-main-aes256-sha256-dh19-pfs-transport-v6-email-r2: 14 windows (email)
+2026-09-07 10:58:10,848 INFO    analyzer.track_b.windows: s027-ikev1-main-aes256-sha256-dh19-pfs-transport-v6-email-r3: 19 windows (email)
+2026-09-07 10:58:10,938 INFO    analyzer.track_b.windows: s027-ikev1-main-aes256-sha256-dh19-pfs-transport-v6-email-r4: 19 windows (email)
+2026-09-07 10:58:14,317 INFO    analyzer.track_b.windows: s028-ikev2-aes256-sha256-dh19-nopfs-tunnel-v6-filexfer: 18 windows (file_transfer)
+2026-09-07 10:58:21,410 INFO    analyzer.track_b.windows: s028-ikev2-aes256-sha256-dh19-nopfs-tunnel-v6-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:58:35,183 INFO    analyzer.track_b.windows: s028-ikev2-aes256-sha256-dh19-nopfs-tunnel-v6-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 10:58:38,787 INFO    analyzer.track_b.windows: s028-ikev2-aes256-sha256-dh19-nopfs-tunnel-v6-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:58:39,114 INFO    analyzer.track_b.windows: s029-ikev1-aggressive-aes256gcm16-dh19-nopfs-tunnel-v4-video: 18 windows (video)
+2026-09-07 10:58:39,609 INFO    analyzer.track_b.windows: s029-ikev1-aggressive-aes256gcm16-dh19-nopfs-tunnel-v4-video-r2: 18 windows (video)
+2026-09-07 10:58:40,432 INFO    analyzer.track_b.windows: s029-ikev1-aggressive-aes256gcm16-dh19-nopfs-tunnel-v4-video-r3: 18 windows (video)
+2026-09-07 10:58:40,747 INFO    analyzer.track_b.windows: s029-ikev1-aggressive-aes256gcm16-dh19-nopfs-tunnel-v4-video-r4: 18 windows (video)
+2026-09-07 10:58:41,012 INFO    analyzer.track_b.windows: s030-ikev1-main-aes256gcm16-dh19-pfs-transport-v6-voip: 18 windows (voip)
+2026-09-07 10:58:41,328 INFO    analyzer.track_b.windows: s030-ikev1-main-aes256gcm16-dh19-pfs-transport-v6-voip-r2: 18 windows (voip)
+2026-09-07 10:58:41,571 INFO    analyzer.track_b.windows: s030-ikev1-main-aes256gcm16-dh19-pfs-transport-v6-voip-r3: 19 windows (voip)
+2026-09-07 10:58:41,833 INFO    analyzer.track_b.windows: s030-ikev1-main-aes256gcm16-dh19-pfs-transport-v6-voip-r4: 18 windows (voip)
+2026-09-07 10:58:41,836 INFO    analyzer.track_b.windows: s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging: 0 windows (messaging)
+2026-09-07 10:58:41,839 INFO    analyzer.track_b.windows: s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging-r2: 0 windows (messaging)
+2026-09-07 10:58:41,842 INFO    analyzer.track_b.windows: s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging-r3: 0 windows (messaging)
+2026-09-07 10:58:41,845 INFO    analyzer.track_b.windows: s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging-r4: 0 windows (messaging)
+2026-09-07 10:58:44,872 INFO    analyzer.track_b.windows: s032-ikev1-main-3des-sha1-dh2-nopfs-tunnel-v6-filexfer: 18 windows (file_transfer)
+2026-09-07 10:58:51,469 INFO    analyzer.track_b.windows: s032-ikev1-main-3des-sha1-dh2-nopfs-tunnel-v6-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:59:03,951 INFO    analyzer.track_b.windows: s032-ikev1-main-3des-sha1-dh2-nopfs-tunnel-v6-filexfer-r3: 19 windows (file_transfer)
+2026-09-07 10:59:07,361 INFO    analyzer.track_b.windows: s032-ikev1-main-3des-sha1-dh2-nopfs-tunnel-v6-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:59:07,482 INFO    analyzer.track_b.windows: s033-ikev2-3des-sha1-dh2-nopfs-transport-v4-email: 18 windows (email)
+2026-09-07 10:59:07,599 INFO    analyzer.track_b.windows: s033-ikev2-3des-sha1-dh2-nopfs-transport-v4-email-r2: 14 windows (email)
+2026-09-07 10:59:07,789 INFO    analyzer.track_b.windows: s033-ikev2-3des-sha1-dh2-nopfs-transport-v4-email-r3: 19 windows (email)
+2026-09-07 10:59:07,894 INFO    analyzer.track_b.windows: s033-ikev2-3des-sha1-dh2-nopfs-transport-v4-email-r4: 19 windows (email)
+2026-09-07 10:59:08,175 INFO    analyzer.track_b.windows: s034-ikev1-aggressive-aes128-sha1-dh2-pfs-transport-v4-video: 18 windows (video)
+2026-09-07 10:59:08,661 INFO    analyzer.track_b.windows: s034-ikev1-aggressive-aes128-sha1-dh2-pfs-transport-v4-video-r2: 18 windows (video)
+2026-09-07 10:59:09,360 INFO    analyzer.track_b.windows: s034-ikev1-aggressive-aes128-sha1-dh2-pfs-transport-v4-video-r3: 18 windows (video)
+2026-09-07 10:59:09,657 INFO    analyzer.track_b.windows: s034-ikev1-aggressive-aes128-sha1-dh2-pfs-transport-v4-video-r4: 18 windows (video)
+2026-09-07 10:59:10,746 INFO    analyzer.track_b.windows: s035-ikev2-aes128-sha1-dh2-nopfs-transport-v4-web: 19 windows (web)
+2026-09-07 10:59:11,179 INFO    analyzer.track_b.windows: s035-ikev2-aes128-sha1-dh2-nopfs-transport-v4-web-r2: 19 windows (web)
+2026-09-07 10:59:12,836 INFO    analyzer.track_b.windows: s035-ikev2-aes128-sha1-dh2-nopfs-transport-v4-web-r3: 19 windows (web)
+2026-09-07 10:59:14,073 INFO    analyzer.track_b.windows: s035-ikev2-aes128-sha1-dh2-nopfs-transport-v4-web-r4: 19 windows (web)
+2026-09-07 10:59:14,153 INFO    analyzer.track_b.windows: s036-ikev1-aggressive-aes128gcm16-dh2-nopfs-tunnel-v6-icmp: 18 windows (icmp)
+2026-09-07 10:59:14,258 INFO    analyzer.track_b.windows: s036-ikev1-aggressive-aes128gcm16-dh2-nopfs-tunnel-v6-icmp-r2: 19 windows (icmp)
+2026-09-07 10:59:14,323 INFO    analyzer.track_b.windows: s036-ikev1-aggressive-aes128gcm16-dh2-nopfs-tunnel-v6-icmp-r3: 18 windows (icmp)
+2026-09-07 10:59:14,403 INFO    analyzer.track_b.windows: s036-ikev1-aggressive-aes128gcm16-dh2-nopfs-tunnel-v6-icmp-r4: 18 windows (icmp)
+2026-09-07 10:59:14,674 INFO    analyzer.track_b.windows: s037-ikev1-aggressive-aes128gcm16-dh2-pfs-tunnel-v6-voip: 18 windows (voip)
+2026-09-07 10:59:15,003 INFO    analyzer.track_b.windows: s037-ikev1-aggressive-aes128gcm16-dh2-pfs-tunnel-v6-voip-r2: 18 windows (voip)
+2026-09-07 10:59:15,258 INFO    analyzer.track_b.windows: s037-ikev1-aggressive-aes128gcm16-dh2-pfs-tunnel-v6-voip-r3: 18 windows (voip)
+2026-09-07 10:59:15,518 INFO    analyzer.track_b.windows: s037-ikev1-aggressive-aes128gcm16-dh2-pfs-tunnel-v6-voip-r4: 18 windows (voip)
+2026-09-07 10:59:15,521 INFO    analyzer.track_b.windows: s038-ikev1-main-aes128gcm16-dh2-pfs-tunnel-v6-messaging: 0 windows (messaging)
+2026-09-07 10:59:15,524 INFO    analyzer.track_b.windows: s038-ikev1-main-aes128gcm16-dh2-pfs-tunnel-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 10:59:15,527 INFO    analyzer.track_b.windows: s038-ikev1-main-aes128gcm16-dh2-pfs-tunnel-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 10:59:15,529 INFO    analyzer.track_b.windows: s038-ikev1-main-aes128gcm16-dh2-pfs-tunnel-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 10:59:17,790 INFO    analyzer.track_b.windows: s039-ikev2-aes128gcm16-dh2-pfs-transport-v6-filexfer: 18 windows (file_transfer)
+2026-09-07 10:59:22,302 INFO    analyzer.track_b.windows: s039-ikev2-aes128gcm16-dh2-pfs-transport-v6-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:59:31,485 INFO    analyzer.track_b.windows: s039-ikev2-aes128gcm16-dh2-pfs-transport-v6-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 10:59:33,758 INFO    analyzer.track_b.windows: s039-ikev2-aes128gcm16-dh2-pfs-transport-v6-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:59:33,975 INFO    analyzer.track_b.windows: s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip: 18 windows (voip)
+2026-09-07 10:59:34,232 INFO    analyzer.track_b.windows: s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip-r2: 18 windows (voip)
+2026-09-07 10:59:34,417 INFO    analyzer.track_b.windows: s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip-r3: 18 windows (voip)
+2026-09-07 10:59:34,630 INFO    analyzer.track_b.windows: s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip-r4: 18 windows (voip)
+2026-09-07 10:59:34,634 INFO    analyzer.track_b.windows: s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging: 0 windows (messaging)
+2026-09-07 10:59:34,637 INFO    analyzer.track_b.windows: s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 10:59:34,640 INFO    analyzer.track_b.windows: s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 10:59:34,642 INFO    analyzer.track_b.windows: s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 10:59:34,752 INFO    analyzer.track_b.windows: s042-ikev1-main-aes256gcm16-dh2-pfs-tunnel-v6-email: 18 windows (email)
+2026-09-07 10:59:34,872 INFO    analyzer.track_b.windows: s042-ikev1-main-aes256gcm16-dh2-pfs-tunnel-v6-email-r2: 14 windows (email)
+2026-09-07 10:59:35,078 INFO    analyzer.track_b.windows: s042-ikev1-main-aes256gcm16-dh2-pfs-tunnel-v6-email-r3: 19 windows (email)
+2026-09-07 10:59:35,186 INFO    analyzer.track_b.windows: s042-ikev1-main-aes256gcm16-dh2-pfs-tunnel-v6-email-r4: 19 windows (email)
+2026-09-07 10:59:37,271 INFO    analyzer.track_b.windows: s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 10:59:41,382 INFO    analyzer.track_b.windows: s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 10:59:49,541 INFO    analyzer.track_b.windows: s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 10:59:51,711 INFO    analyzer.track_b.windows: s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 10:59:53,004 INFO    analyzer.track_b.windows: s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web: 19 windows (web)
+2026-09-07 10:59:53,533 INFO    analyzer.track_b.windows: s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web-r2: 19 windows (web)
+2026-09-07 10:59:55,449 INFO    analyzer.track_b.windows: s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web-r3: 19 windows (web)
+2026-09-07 10:59:56,911 INFO    analyzer.track_b.windows: s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web-r4: 19 windows (web)
+2026-09-07 10:59:57,990 INFO    analyzer.track_b.windows: s045-ikev1-main-3des-sha1-dh20-pfs-tunnel-v4-web: 19 windows (web)
+2026-09-07 10:59:58,408 INFO    analyzer.track_b.windows: s045-ikev1-main-3des-sha1-dh20-pfs-tunnel-v4-web-r2: 19 windows (web)
+2026-09-07 11:00:00,007 INFO    analyzer.track_b.windows: s045-ikev1-main-3des-sha1-dh20-pfs-tunnel-v4-web-r3: 19 windows (web)
+2026-09-07 11:00:01,163 INFO    analyzer.track_b.windows: s045-ikev1-main-3des-sha1-dh20-pfs-tunnel-v4-web-r4: 19 windows (web)
+2026-09-07 11:00:01,412 INFO    analyzer.track_b.windows: s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip: 18 windows (voip)
+2026-09-07 11:00:01,726 INFO    analyzer.track_b.windows: s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip-r2: 18 windows (voip)
+2026-09-07 11:00:01,956 INFO    analyzer.track_b.windows: s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip-r3: 18 windows (voip)
+2026-09-07 11:00:02,231 INFO    analyzer.track_b.windows: s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip-r4: 18 windows (voip)
+2026-09-07 11:00:04,227 INFO    analyzer.track_b.windows: s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 11:00:08,291 INFO    analyzer.track_b.windows: s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 11:00:16,524 INFO    analyzer.track_b.windows: s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 11:00:18,573 INFO    analyzer.track_b.windows: s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 11:00:18,658 INFO    analyzer.track_b.windows: s048-ikev1-main-aes128-sha1-dh20-pfs-transport-v4-icmp: 19 windows (icmp)
+2026-09-07 11:00:18,749 INFO    analyzer.track_b.windows: s048-ikev1-main-aes128-sha1-dh20-pfs-transport-v4-icmp-r2: 19 windows (icmp)
+2026-09-07 11:00:18,809 INFO    analyzer.track_b.windows: s048-ikev1-main-aes128-sha1-dh20-pfs-transport-v4-icmp-r3: 18 windows (icmp)
+2026-09-07 11:00:18,887 INFO    analyzer.track_b.windows: s048-ikev1-main-aes128-sha1-dh20-pfs-transport-v4-icmp-r4: 19 windows (icmp)
+2026-09-07 11:00:19,175 INFO    analyzer.track_b.windows: s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video: 18 windows (video)
+2026-09-07 11:00:19,669 INFO    analyzer.track_b.windows: s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video-r2: 18 windows (video)
+2026-09-07 11:00:20,364 INFO    analyzer.track_b.windows: s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video-r3: 18 windows (video)
+2026-09-07 11:00:20,646 INFO    analyzer.track_b.windows: s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video-r4: 18 windows (video)
+2026-09-07 11:00:20,650 INFO    analyzer.track_b.windows: s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging: 0 windows (messaging)
+2026-09-07 11:00:20,653 INFO    analyzer.track_b.windows: s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 11:00:20,655 INFO    analyzer.track_b.windows: s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 11:00:20,657 INFO    analyzer.track_b.windows: s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 11:00:23,449 INFO    analyzer.track_b.windows: s051-ikev1-main-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 11:00:29,594 INFO    analyzer.track_b.windows: s051-ikev1-main-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 11:00:41,489 INFO    analyzer.track_b.windows: s051-ikev1-main-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r3: 19 windows (file_transfer)
+2026-09-07 11:00:44,488 INFO    analyzer.track_b.windows: s051-ikev1-main-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 11:00:44,622 INFO    analyzer.track_b.windows: s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email: 18 windows (email)
+2026-09-07 11:00:44,769 INFO    analyzer.track_b.windows: s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email-r2: 14 windows (email)
+2026-09-07 11:00:44,980 INFO    analyzer.track_b.windows: s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email-r3: 19 windows (email)
+2026-09-07 11:00:45,086 INFO    analyzer.track_b.windows: s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email-r4: 19 windows (email)
+2026-09-07 11:00:47,850 INFO    analyzer.track_b.windows: s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 11:00:52,873 INFO    analyzer.track_b.windows: s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 11:01:03,160 INFO    analyzer.track_b.windows: s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r3: 18 windows (file_transfer)
+2026-09-07 11:01:05,934 INFO    analyzer.track_b.windows: s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 11:01:07,236 INFO    analyzer.track_b.windows: s054-ikev1-aggressive-aes256-sha256-dh20-nopfs-tunnel-v6-web: 19 windows (web)
+2026-09-07 11:01:07,745 INFO    analyzer.track_b.windows: s054-ikev1-aggressive-aes256-sha256-dh20-nopfs-tunnel-v6-web-r2: 19 windows (web)
+2026-09-07 11:01:09,691 INFO    analyzer.track_b.windows: s054-ikev1-aggressive-aes256-sha256-dh20-nopfs-tunnel-v6-web-r3: 19 windows (web)
+2026-09-07 11:01:11,074 INFO    analyzer.track_b.windows: s054-ikev1-aggressive-aes256-sha256-dh20-nopfs-tunnel-v6-web-r4: 19 windows (web)
+2026-09-07 11:01:13,151 INFO    analyzer.track_b.windows: s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 11:01:17,355 INFO    analyzer.track_b.windows: s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 11:01:25,784 INFO    analyzer.track_b.windows: s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer-r3: 19 windows (file_transfer)
+2026-09-07 11:01:27,852 INFO    analyzer.track_b.windows: s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 11:01:29,063 INFO    analyzer.track_b.windows: s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web: 19 windows (web)
+2026-09-07 11:01:29,544 INFO    analyzer.track_b.windows: s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web-r2: 19 windows (web)
+2026-09-07 11:01:31,293 INFO    analyzer.track_b.windows: s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web-r3: 19 windows (web)
+2026-09-07 11:01:32,616 INFO    analyzer.track_b.windows: s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web-r4: 19 windows (web)
+2026-09-07 11:01:34,740 INFO    analyzer.track_b.windows: s057-ikev1-aggressive-aes256gcm16-dh20-pfs-transport-v4-filexfer: 18 windows (file_transfer)
+2026-09-07 11:01:38,913 INFO    analyzer.track_b.windows: s057-ikev1-aggressive-aes256gcm16-dh20-pfs-transport-v4-filexfer-r2: 18 windows (file_transfer)
+2026-09-07 11:01:47,343 INFO    analyzer.track_b.windows: s057-ikev1-aggressive-aes256gcm16-dh20-pfs-transport-v4-filexfer-r3: 19 windows (file_transfer)
+2026-09-07 11:01:49,391 INFO    analyzer.track_b.windows: s057-ikev1-aggressive-aes256gcm16-dh20-pfs-transport-v4-filexfer-r4: 18 windows (file_transfer)
+2026-09-07 11:01:49,479 INFO    analyzer.track_b.windows: s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp: 18 windows (icmp)
+2026-09-07 11:01:49,582 INFO    analyzer.track_b.windows: s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp-r2: 19 windows (icmp)
+2026-09-07 11:01:49,645 INFO    analyzer.track_b.windows: s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp-r3: 18 windows (icmp)
+2026-09-07 11:01:49,722 INFO    analyzer.track_b.windows: s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp-r4: 18 windows (icmp)
+2026-09-07 11:01:49,725 INFO    analyzer.track_b.windows: s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging: 0 windows (messaging)
+2026-09-07 11:01:49,727 INFO    analyzer.track_b.windows: s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging-r2: 0 windows (messaging)
+2026-09-07 11:01:49,730 INFO    analyzer.track_b.windows: s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging-r3: 0 windows (messaging)
+2026-09-07 11:01:49,732 INFO    analyzer.track_b.windows: s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging-r4: 0 windows (messaging)
+2026-09-07 11:01:49,942 INFO    analyzer.track_b.windows: weak-reference: 18 windows (voip)
+2026-09-07 11:01:50,226 INFO    analyzer.track_b.windows: weak-reference-r2: 18 windows (voip)
+2026-09-07 11:01:50,405 INFO    analyzer.track_b.windows: weak-reference-r3: 18 windows (voip)
+2026-09-07 11:01:50,608 INFO    analyzer.track_b.windows: weak-reference-r4: 18 windows (voip)
+2026-09-07 11:01:50,612 INFO    __main__: split: 35 train / 8 calibration / 11 test configurations
+2026-09-07 11:01:51,083 INFO    __main__: step 9.6: LightGBM baseline over 74 tabular features
+2026-09-07 11:01:56,699 INFO    __main__: LightGBM test:
+macro-F1 1.0000   accuracy 1.0000
+  email          F1 1.0000   support 140
+  file_transfer  F1 1.0000   support 144
+  icmp           F1 1.0000   support 73
+  video          F1 1.0000   support 144
+  voip           F1 1.0000   support 144
+  web            F1 1.0000   support 152
+2026-09-07 11:01:56,734 INFO    analyzer.track_b.calibration: isotonic: ECE 0.0000 -> 0.0000
+2026-09-07 11:01:56,737 INFO    __main__: step 9.7: 1D-CNN over the 128-length sequence plus tabular
+2026-09-07 11:02:04,254 INFO    analyzer.track_b.traffic_clf: epoch 1: loss 0.4095, validation macro-F1 0.9948
+2026-09-07 11:02:05,701 INFO    analyzer.track_b.traffic_clf: epoch 2: loss 0.0199, validation macro-F1 0.9948
+2026-09-07 11:02:07,297 INFO    analyzer.track_b.traffic_clf: epoch 3: loss 0.0094, validation macro-F1 0.9982
+2026-09-07 11:02:08,720 INFO    analyzer.track_b.traffic_clf: epoch 4: loss 0.0045, validation macro-F1 0.9982
+2026-09-07 11:02:10,121 INFO    analyzer.track_b.traffic_clf: epoch 5: loss 0.0033, validation macro-F1 1.0000
+2026-09-07 11:02:11,526 INFO    analyzer.track_b.traffic_clf: epoch 6: loss 0.0020, validation macro-F1 0.9982
+2026-09-07 11:02:12,906 INFO    analyzer.track_b.traffic_clf: epoch 7: loss 0.0015, validation macro-F1 1.0000
+2026-09-07 11:02:14,283 INFO    analyzer.track_b.traffic_clf: epoch 8: loss 0.0009, validation macro-F1 1.0000
+2026-09-07 11:02:15,697 INFO    analyzer.track_b.traffic_clf: epoch 9: loss 0.0014, validation macro-F1 0.9982
+2026-09-07 11:02:17,237 INFO    analyzer.track_b.traffic_clf: epoch 10: loss 0.0006, validation macro-F1 0.9982
+2026-09-07 11:02:18,672 INFO    analyzer.track_b.traffic_clf: epoch 11: loss 0.0005, validation macro-F1 1.0000
+2026-09-07 11:02:20,147 INFO    analyzer.track_b.traffic_clf: epoch 12: loss 0.0003, validation macro-F1 1.0000
+2026-09-07 11:02:21,547 INFO    analyzer.track_b.traffic_clf: epoch 13: loss 0.0003, validation macro-F1 1.0000
+2026-09-07 11:02:22,947 INFO    analyzer.track_b.traffic_clf: epoch 14: loss 0.0003, validation macro-F1 1.0000
+2026-09-07 11:02:24,317 INFO    analyzer.track_b.traffic_clf: epoch 15: loss 0.0003, validation macro-F1 1.0000
+2026-09-07 11:02:25,757 INFO    analyzer.track_b.traffic_clf: epoch 16: loss 0.0004, validation macro-F1 1.0000
+2026-09-07 11:02:27,201 INFO    analyzer.track_b.traffic_clf: epoch 17: loss 0.0003, validation macro-F1 0.9982
+2026-09-07 11:02:28,628 INFO    analyzer.track_b.traffic_clf: epoch 18: loss 0.0003, validation macro-F1 1.0000
+2026-09-07 11:02:30,094 INFO    analyzer.track_b.traffic_clf: epoch 19: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:31,468 INFO    analyzer.track_b.traffic_clf: epoch 20: loss 0.0002, validation macro-F1 1.0000
+2026-09-07 11:02:32,983 INFO    analyzer.track_b.traffic_clf: epoch 21: loss 0.0002, validation macro-F1 1.0000
+2026-09-07 11:02:34,601 INFO    analyzer.track_b.traffic_clf: epoch 22: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:36,219 INFO    analyzer.track_b.traffic_clf: epoch 23: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:37,774 INFO    analyzer.track_b.traffic_clf: epoch 24: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:39,226 INFO    analyzer.track_b.traffic_clf: epoch 25: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:40,648 INFO    analyzer.track_b.traffic_clf: epoch 26: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:42,016 INFO    analyzer.track_b.traffic_clf: epoch 27: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:43,419 INFO    analyzer.track_b.traffic_clf: epoch 28: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:44,850 INFO    analyzer.track_b.traffic_clf: epoch 29: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:46,332 INFO    analyzer.track_b.traffic_clf: epoch 30: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:02:47,729 INFO    analyzer.track_b.traffic_clf: epoch 31: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:49,190 INFO    analyzer.track_b.traffic_clf: epoch 32: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:50,621 INFO    analyzer.track_b.traffic_clf: epoch 33: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:52,014 INFO    analyzer.track_b.traffic_clf: epoch 34: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:02:53,423 INFO    analyzer.track_b.traffic_clf: epoch 35: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:54,889 INFO    analyzer.track_b.traffic_clf: epoch 36: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:56,444 INFO    analyzer.track_b.traffic_clf: epoch 37: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:02:57,913 INFO    analyzer.track_b.traffic_clf: epoch 38: loss 0.0003, validation macro-F1 1.0000
+2026-09-07 11:02:59,352 INFO    analyzer.track_b.traffic_clf: epoch 39: loss 0.0005, validation macro-F1 1.0000
+2026-09-07 11:03:00,834 INFO    analyzer.track_b.traffic_clf: epoch 40: loss 0.0002, validation macro-F1 1.0000
+2026-09-07 11:03:02,223 INFO    analyzer.track_b.traffic_clf: epoch 41: loss 0.0002, validation macro-F1 1.0000
+2026-09-07 11:03:03,650 INFO    analyzer.track_b.traffic_clf: epoch 42: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:05,109 INFO    analyzer.track_b.traffic_clf: epoch 43: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:06,641 INFO    analyzer.track_b.traffic_clf: epoch 44: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:08,075 INFO    analyzer.track_b.traffic_clf: epoch 45: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:09,468 INFO    analyzer.track_b.traffic_clf: epoch 46: loss 0.0005, validation macro-F1 1.0000
+2026-09-07 11:03:10,901 INFO    analyzer.track_b.traffic_clf: epoch 47: loss 0.0007, validation macro-F1 1.0000
+2026-09-07 11:03:12,253 INFO    analyzer.track_b.traffic_clf: epoch 48: loss 0.0002, validation macro-F1 1.0000
+2026-09-07 11:03:13,607 INFO    analyzer.track_b.traffic_clf: epoch 49: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:15,015 INFO    analyzer.track_b.traffic_clf: epoch 50: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:16,481 INFO    analyzer.track_b.traffic_clf: epoch 51: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:17,871 INFO    analyzer.track_b.traffic_clf: epoch 52: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:19,310 INFO    analyzer.track_b.traffic_clf: epoch 53: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:20,743 INFO    analyzer.track_b.traffic_clf: epoch 54: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:22,113 INFO    analyzer.track_b.traffic_clf: epoch 55: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:23,536 INFO    analyzer.track_b.traffic_clf: epoch 56: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:24,967 INFO    analyzer.track_b.traffic_clf: epoch 57: loss 0.0001, validation macro-F1 1.0000
+2026-09-07 11:03:26,452 INFO    analyzer.track_b.traffic_clf: epoch 58: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:27,859 INFO    analyzer.track_b.traffic_clf: epoch 59: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:29,353 INFO    analyzer.track_b.traffic_clf: epoch 60: loss 0.0000, validation macro-F1 1.0000
+2026-09-07 11:03:29,500 INFO    __main__: CNN test:
+macro-F1 0.9988   accuracy 0.9987
+  email          F1 0.9964   support 140
+  file_transfer  F1 0.9965   support 144
+  icmp           F1 1.0000   support 73
+  video          F1 1.0000   support 144
+  voip           F1 1.0000   support 144
+  web            F1 1.0000   support 152
+2026-09-07 11:03:29,589 WARNING analyzer.track_b.calibration: the calibration fold contains no errors (584/584 correct), so temperature scaling is degenerate and would drive confidence to 1.0. Leaving the CNN uncalibrated (T=1.0)
+2026-09-07 11:09:10,113 INFO    __main__: mode classifier test:
+macro-F1 0.7179   accuracy 0.7273
+  transport      F1 0.6667   support 24
+  tunnel         F1 0.7692   support 20
+metrics written to E:\SIH\ipsec-analyzer\backend\models\metrics.json

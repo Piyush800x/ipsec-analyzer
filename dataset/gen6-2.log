@@ -1,0 +1,135 @@
+2026-09-07 00:40:06,924 INFO    testbed.sampler: sampled 62 configurations from a cross-product of 3360
+2026-09-07 00:40:06,925 INFO    __main__: shard 2/6: 42 configurations on subnet index 1
+2026-09-07 00:40:08,505 INFO    __main__: [1/42] weak-reference-r2 already done, skipping
+2026-09-07 00:40:08,505 INFO    __main__: [2/42] hardened-reference-r4 already done, skipping
+2026-09-07 00:40:08,505 INFO    __main__: [3/42] s001-ikev1-main-3des-sha1-dh14-nopfs-transport-v4-voip-r2 already done, skipping
+2026-09-07 00:40:08,506 INFO    __main__: [4/42] s002-ikev2-3des-sha1-dh14-pfs-transport-v6-icmp-r4 already done, skipping
+2026-09-07 00:40:08,506 INFO    __main__: [5/42] s004-ikev1-main-aes128-sha1-dh14-pfs-tunnel-v6-filexfer-r2 already done, skipping
+2026-09-07 00:40:08,507 INFO    __main__: [6/42] s005-ikev2-aes128-sha1-dh14-nopfs-tunnel-v4-video-r4 already done, skipping
+2026-09-07 00:40:08,507 INFO    __main__: [7/42] s007-ikev2-aes128gcm16-dh14-pfs-tunnel-v6-web-r2 already done, skipping
+2026-09-07 00:40:08,508 INFO    __main__: [8/42] s008-ikev1-aggressive-aes256-sha256-dh14-nopfs-transport-v4-icmp-r4 already done, skipping
+2026-09-07 00:40:08,508 INFO    __main__: [9/42] s010-ikev1-main-aes256-sha256-dh14-pfs-tunnel-v6-email-r2 already done, skipping
+2026-09-07 00:40:08,508 INFO    __main__: [10/42] s011-ikev2-aes256-sha256-dh14-nopfs-transport-v4-voip-r4 already done, skipping
+2026-09-07 00:40:08,508 INFO    __main__: [11/42] s013-ikev1-aggressive-aes256gcm16-dh14-nopfs-transport-v6-web-r2 already done, skipping
+2026-09-07 00:40:08,508 INFO    __main__: [12/42] s014-ikev1-main-aes256gcm16-dh14-nopfs-transport-v4-email-r4 already done, skipping
+2026-09-07 00:40:08,509 INFO    __main__: [13/42] s016-ikev2-aes256gcm16-dh14-nopfs-tunnel-v4-video-r2 already done, skipping
+2026-09-07 00:40:08,509 INFO    __main__: [14/42] s017-ikev1-aggressive-3des-sha1-dh19-nopfs-tunnel-v4-icmp-r4 already done, skipping
+2026-09-07 00:40:08,509 INFO    __main__: [15/42] s019-ikev2-3des-sha1-dh19-nopfs-tunnel-v6-messaging-r2 already done, skipping
+2026-09-07 00:40:08,509 INFO    __main__: [16/42] s020-ikev1-aggressive-aes128-sha1-dh19-nopfs-tunnel-v6-voip-r4 already done, skipping
+2026-09-07 00:40:08,510 INFO    __main__: [17/42] s022-ikev2-aes128-sha1-dh19-pfs-transport-v6-filexfer-r2 already done, skipping
+2026-09-07 00:40:08,510 INFO    __main__: [18/42] s023-ikev2-aes128-sha1-dh19-pfs-tunnel-v6-web-r4 already done, skipping
+2026-09-07 00:40:08,510 INFO    __main__: [19/42] s025-ikev2-aes128gcm16-dh19-nopfs-transport-v4-web-r2 already done, skipping
+2026-09-07 00:40:08,510 INFO    __main__: [20/42] s026-ikev1-aggressive-aes256-sha256-dh19-pfs-transport-v6-messaging-r4 already done, skipping
+2026-09-07 00:40:08,510 INFO    __main__: [21/42] s028-ikev2-aes256-sha256-dh19-nopfs-tunnel-v6-filexfer-r2 already done, skipping
+2026-09-07 00:40:08,511 INFO    __main__: [22/42] s029-ikev1-aggressive-aes256gcm16-dh19-nopfs-tunnel-v4-video-r4 already done, skipping
+2026-09-07 00:40:08,512 INFO    __main__: [23/42] s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging-r2
+2026-09-07 00:40:10,962 INFO    testbed.peers: peer pair d864f437f3 up: ipsec-tb-d864f437f3-left / ipsec-tb-d864f437f3-right
+2026-09-07 00:40:11,137 INFO    testbed.capture: [ipsec-tb-d864f437f3-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:40:12,055 INFO    testbed.tunnel: [ipsec-tb-d864f437f3-left] SA up: ike=3DES_CBC/HMAC_SHA1_96/PRF_HMAC_SHA1/MODP_1024 child=3DES_CBC/HMAC_SHA1_96/MODP_1024
+2026-09-07 00:40:12,061 INFO    testbed.traffic.base: generating messaging traffic for 90s (seed 20260904)
+2026-09-07 00:41:50,441 INFO    testbed.capture: [ipsec-tb-d864f437f3-left] captured 66 packets to ..\dataset\sessions\s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging-r2\capture.pcap
+2026-09-07 00:41:51,693 INFO    testbed.orchestrator: [s031-ikev1-aggressive-3des-sha1-dh2-pfs-transport-v4-messaging-r2] session complete: 66 packets, 103.2s, delete=True
+2026-09-07 00:41:51,697 INFO    __main__: [24/42] s032-ikev1-main-3des-sha1-dh2-nopfs-tunnel-v6-filexfer-r4 already done, skipping
+2026-09-07 00:41:51,698 INFO    __main__: [25/42] s034-ikev1-aggressive-aes128-sha1-dh2-pfs-transport-v4-video-r2 already done, skipping
+2026-09-07 00:41:51,698 INFO    __main__: [26/42] s035-ikev2-aes128-sha1-dh2-nopfs-transport-v4-web-r4 already done, skipping
+2026-09-07 00:41:51,698 INFO    __main__: [27/42] s037-ikev1-aggressive-aes128gcm16-dh2-pfs-tunnel-v6-voip-r2 already done, skipping
+2026-09-07 00:41:51,698 INFO    __main__: [28/42] s038-ikev1-main-aes128gcm16-dh2-pfs-tunnel-v6-messaging-r4 already done, skipping
+2026-09-07 00:41:51,698 INFO    __main__: [29/42] s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip-r2
+2026-09-07 00:41:53,156 INFO    testbed.peers: peer pair 2e0190387b up: ipsec-tb-2e0190387b-left / ipsec-tb-2e0190387b-right
+2026-09-07 00:41:53,338 INFO    testbed.capture: [ipsec-tb-2e0190387b-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:41:54,049 INFO    testbed.tunnel: [ipsec-tb-2e0190387b-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/MODP_1024 child=AES_CBC-256/HMAC_SHA2_256_128/MODP_1024
+2026-09-07 00:41:54,049 INFO    testbed.traffic.base: generating voip traffic for 90s (seed 20260904)
+2026-09-07 00:43:29,164 INFO    testbed.capture: [ipsec-tb-2e0190387b-left] captured 9936 packets to ..\dataset\sessions\s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip-r2\capture.pcap
+2026-09-07 00:43:30,326 INFO    testbed.orchestrator: [s040-ikev1-aggressive-aes256-sha256-dh2-pfs-tunnel-v4-voip-r2] session complete: 9936 packets, 98.6s, delete=True
+2026-09-07 00:43:30,330 INFO    __main__: [30/42] s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging-r4
+2026-09-07 00:43:31,333 INFO    testbed.peers: peer pair 51f7ee81b3 up: ipsec-tb-51f7ee81b3-left / ipsec-tb-51f7ee81b3-right
+2026-09-07 00:43:31,509 INFO    testbed.capture: [ipsec-tb-51f7ee81b3-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:43:32,344 INFO    testbed.tunnel: [ipsec-tb-51f7ee81b3-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/MODP_1024 child=AES_GCM_16-256/MODP_1024
+2026-09-07 00:43:32,344 INFO    testbed.traffic.base: generating messaging traffic for 90s (seed 20260906)
+2026-09-07 00:45:08,214 INFO    testbed.capture: [ipsec-tb-51f7ee81b3-left] captured 60 packets to ..\dataset\sessions\s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging-r4\capture.pcap
+2026-09-07 00:45:09,305 INFO    testbed.orchestrator: [s041-ikev1-aggressive-aes256gcm16-dh2-pfs-tunnel-v6-messaging-r4] session complete: 60 packets, 99.0s, delete=True
+2026-09-07 00:45:09,309 INFO    __main__: [31/42] s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer-r2
+2026-09-07 00:45:10,564 INFO    testbed.peers: peer pair 58a5eaeb58 up: ipsec-tb-58a5eaeb58-left / ipsec-tb-58a5eaeb58-right
+2026-09-07 00:45:10,771 INFO    testbed.capture: [ipsec-tb-58a5eaeb58-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:45:11,598 INFO    testbed.tunnel: [ipsec-tb-58a5eaeb58-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/MODP_1024 child=AES_GCM_16-256
+2026-09-07 00:45:11,598 INFO    testbed.traffic.base: generating file_transfer traffic for 90s (seed 20260904)
+2026-09-07 00:47:00,458 INFO    testbed.capture: [ipsec-tb-58a5eaeb58-left] captured 165452 packets to ..\dataset\sessions\s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer-r2\capture.pcap
+2026-09-07 00:47:02,814 INFO    testbed.orchestrator: [s043-ikev2-aes256gcm16-dh2-nopfs-transport-v4-filexfer-r2] session complete: 165452 packets, 113.5s, delete=True
+2026-09-07 00:47:02,818 INFO    __main__: [32/42] s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web-r4
+2026-09-07 00:47:03,791 INFO    testbed.peers: peer pair dda56bacdb up: ipsec-tb-dda56bacdb-left / ipsec-tb-dda56bacdb-right
+2026-09-07 00:47:03,974 INFO    testbed.capture: [ipsec-tb-dda56bacdb-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:47:04,565 INFO    testbed.tunnel: [ipsec-tb-dda56bacdb-left] SA up: ike=3DES_CBC/HMAC_SHA1_96/PRF_HMAC_SHA1/ECP_384 child=3DES_CBC/HMAC_SHA1_96
+2026-09-07 00:47:04,565 INFO    testbed.traffic.base: generating web traffic for 90s (seed 20260906)
+2026-09-07 00:48:47,237 INFO    testbed.capture: [ipsec-tb-dda56bacdb-left] captured 52869 packets to ..\dataset\sessions\s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web-r4\capture.pcap
+2026-09-07 00:48:50,601 INFO    testbed.orchestrator: [s044-ikev1-aggressive-3des-sha1-dh20-nopfs-transport-v6-web-r4] session complete: 52869 packets, 107.8s, delete=True
+2026-09-07 00:48:50,605 INFO    __main__: [33/42] s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip-r2
+2026-09-07 00:48:52,945 INFO    testbed.peers: peer pair 7b28ee73aa up: ipsec-tb-7b28ee73aa-left / ipsec-tb-7b28ee73aa-right
+2026-09-07 00:48:53,120 INFO    testbed.capture: [ipsec-tb-7b28ee73aa-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:48:53,720 INFO    testbed.tunnel: [ipsec-tb-7b28ee73aa-left] SA up: ike=3DES_CBC/HMAC_SHA1_96/PRF_HMAC_SHA1/ECP_384 child=3DES_CBC/HMAC_SHA1_96
+2026-09-07 00:48:53,720 INFO    testbed.traffic.base: generating voip traffic for 90s (seed 20260904)
+2026-09-07 00:50:29,526 INFO    testbed.capture: [ipsec-tb-7b28ee73aa-left] captured 11721 packets to ..\dataset\sessions\s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip-r2\capture.pcap
+2026-09-07 00:50:31,037 INFO    testbed.orchestrator: [s046-ikev2-3des-sha1-dh20-pfs-tunnel-v6-voip-r2] session complete: 11721 packets, 100.4s, delete=True
+2026-09-07 00:50:31,042 INFO    __main__: [34/42] s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer-r4
+2026-09-07 00:50:32,030 INFO    testbed.peers: peer pair 90b5f2033a up: ipsec-tb-90b5f2033a-left / ipsec-tb-90b5f2033a-right
+2026-09-07 00:50:32,223 INFO    testbed.capture: [ipsec-tb-90b5f2033a-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:50:33,094 INFO    testbed.tunnel: [ipsec-tb-90b5f2033a-left] SA up: ike=AES_CBC-128/HMAC_SHA1_96/PRF_HMAC_SHA1/ECP_384 child=AES_CBC-128/HMAC_SHA1_96
+2026-09-07 00:50:33,094 INFO    testbed.traffic.base: generating file_transfer traffic for 90s (seed 20260906)
+2026-09-07 00:52:26,274 INFO    testbed.capture: [ipsec-tb-90b5f2033a-left] captured 82917 packets to ..\dataset\sessions\s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer-r4\capture.pcap
+2026-09-07 00:52:28,944 INFO    testbed.orchestrator: [s047-ikev1-aggressive-aes128-sha1-dh20-nopfs-transport-v4-filexfer-r4] session complete: 82917 packets, 117.9s, delete=True
+2026-09-07 00:52:28,948 INFO    __main__: [35/42] s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video-r2
+2026-09-07 00:52:30,586 INFO    testbed.peers: peer pair c6a1ec7011 up: ipsec-tb-c6a1ec7011-left / ipsec-tb-c6a1ec7011-right
+2026-09-07 00:52:30,858 INFO    testbed.capture: [ipsec-tb-c6a1ec7011-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:52:31,817 INFO    testbed.tunnel: [ipsec-tb-c6a1ec7011-left] SA up: ike=AES_CBC-128/HMAC_SHA1_96/PRF_HMAC_SHA1/ECP_384 child=AES_CBC-128/HMAC_SHA1_96
+2026-09-07 00:52:31,817 INFO    testbed.traffic.base: generating video traffic for 90s (seed 20260904)
+2026-09-07 00:54:11,168 INFO    testbed.capture: [ipsec-tb-c6a1ec7011-left] captured 17990 packets to ..\dataset\sessions\s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video-r2\capture.pcap
+2026-09-07 00:54:13,134 INFO    testbed.orchestrator: [s049-ikev1-main-aes128-sha1-dh20-nopfs-tunnel-v4-video-r2] session complete: 17990 packets, 104.2s, delete=True
+2026-09-07 00:54:13,140 INFO    __main__: [36/42] s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging-r4
+2026-09-07 00:54:15,583 INFO    testbed.peers: peer pair f3e4ef4fce up: ipsec-tb-f3e4ef4fce-left / ipsec-tb-f3e4ef4fce-right
+2026-09-07 00:54:15,881 INFO    testbed.capture: [ipsec-tb-f3e4ef4fce-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:54:16,640 INFO    testbed.tunnel: [ipsec-tb-f3e4ef4fce-left] SA up: ike=AES_CBC-128/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_GCM_16-128
+2026-09-07 00:54:16,640 INFO    testbed.traffic.base: generating messaging traffic for 90s (seed 20260906)
+2026-09-07 00:55:51,420 INFO    testbed.capture: [ipsec-tb-f3e4ef4fce-left] captured 60 packets to ..\dataset\sessions\s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging-r4\capture.pcap
+2026-09-07 00:55:53,102 INFO    testbed.orchestrator: [s050-ikev1-aggressive-aes128gcm16-dh20-nopfs-transport-v6-messaging-r4] session complete: 60 packets, 100.0s, delete=True
+2026-09-07 00:55:53,106 INFO    __main__: [37/42] s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email-r2
+2026-09-07 00:55:55,732 INFO    testbed.peers: peer pair 029a3c7753 up: ipsec-tb-029a3c7753-left / ipsec-tb-029a3c7753-right
+2026-09-07 00:55:56,534 INFO    testbed.capture: [ipsec-tb-029a3c7753-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:55:59,642 INFO    testbed.tunnel: [ipsec-tb-029a3c7753-left] SA up: ike=AES_CBC-128/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_GCM_16-128
+2026-09-07 00:55:59,642 INFO    testbed.traffic.base: generating email traffic for 90s (seed 20260904)
+2026-09-07 00:57:38,023 INFO    testbed.capture: [ipsec-tb-029a3c7753-left] captured 3575 packets to ..\dataset\sessions\s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email-r2\capture.pcap
+2026-09-07 00:57:39,994 INFO    testbed.orchestrator: [s052-ikev1-main-aes128gcm16-dh20-nopfs-transport-v6-email-r2] session complete: 3575 packets, 106.9s, delete=True
+2026-09-07 00:57:39,998 INFO    __main__: [38/42] s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r4
+2026-09-07 00:57:40,996 INFO    testbed.peers: peer pair d39fe19a3b up: ipsec-tb-d39fe19a3b-left / ipsec-tb-d39fe19a3b-right
+2026-09-07 00:57:41,191 INFO    testbed.capture: [ipsec-tb-d39fe19a3b-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:57:41,744 INFO    testbed.tunnel: [ipsec-tb-d39fe19a3b-left] SA up: ike=AES_CBC-128/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_GCM_16-128
+2026-09-07 00:57:41,744 INFO    testbed.traffic.base: generating file_transfer traffic for 90s (seed 20260906)
+2026-09-07 00:59:21,695 INFO    testbed.capture: [ipsec-tb-d39fe19a3b-left] captured 105777 packets to ..\dataset\sessions\s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r4\capture.pcap
+2026-09-07 00:59:24,707 INFO    testbed.orchestrator: [s053-ikev2-aes128gcm16-dh20-nopfs-tunnel-v4-filexfer-r4] session complete: 105777 packets, 104.7s, delete=True
+2026-09-07 00:59:24,712 INFO    __main__: [39/42] s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer-r2
+2026-09-07 00:59:25,803 INFO    testbed.peers: peer pair b3f27f60d0 up: ipsec-tb-b3f27f60d0-left / ipsec-tb-b3f27f60d0-right
+2026-09-07 00:59:25,985 INFO    testbed.capture: [ipsec-tb-b3f27f60d0-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 00:59:26,585 INFO    testbed.tunnel: [ipsec-tb-b3f27f60d0-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_CBC-256/HMAC_SHA2_256_128
+2026-09-07 00:59:26,585 INFO    testbed.traffic.base: generating file_transfer traffic for 90s (seed 20260904)
+2026-09-07 01:01:14,646 INFO    testbed.capture: [ipsec-tb-b3f27f60d0-left] captured 166519 packets to ..\dataset\sessions\s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer-r2\capture.pcap
+2026-09-07 01:01:17,922 INFO    testbed.orchestrator: [s055-ikev1-main-aes256-sha256-dh20-nopfs-transport-v4-filexfer-r2] session complete: 166519 packets, 113.2s, delete=True
+2026-09-07 01:01:17,926 INFO    __main__: [40/42] s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web-r4
+2026-09-07 01:01:19,485 INFO    testbed.peers: peer pair 584da163a2 up: ipsec-tb-584da163a2-left / ipsec-tb-584da163a2-right
+2026-09-07 01:01:19,709 INFO    testbed.capture: [ipsec-tb-584da163a2-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 01:01:20,280 INFO    testbed.tunnel: [ipsec-tb-584da163a2-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_CBC-256/HMAC_SHA2_256_128
+2026-09-07 01:01:20,280 INFO    testbed.traffic.base: generating web traffic for 90s (seed 20260906)
+2026-09-07 01:03:01,702 INFO    testbed.capture: [ipsec-tb-584da163a2-left] captured 50892 packets to ..\dataset\sessions\s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web-r4\capture.pcap
+2026-09-07 01:03:03,248 INFO    testbed.orchestrator: [s056-ikev2-aes256-sha256-dh20-pfs-transport-v6-web-r4] session complete: 50892 packets, 105.3s, delete=True
+2026-09-07 01:03:03,252 INFO    __main__: [41/42] s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp-r2
+2026-09-07 01:03:05,208 INFO    testbed.peers: peer pair 5dd9809906 up: ipsec-tb-5dd9809906-left / ipsec-tb-5dd9809906-right
+2026-09-07 01:03:05,396 INFO    testbed.capture: [ipsec-tb-5dd9809906-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 01:03:06,091 INFO    testbed.tunnel: [ipsec-tb-5dd9809906-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_GCM_16-256
+2026-09-07 01:03:06,092 INFO    testbed.traffic.base: generating icmp traffic for 90s (seed 20260904)
+2026-09-07 01:04:43,629 INFO    testbed.capture: [ipsec-tb-5dd9809906-left] captured 1806 packets to ..\dataset\sessions\s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp-r2\capture.pcap
+2026-09-07 01:04:45,150 INFO    testbed.orchestrator: [s058-ikev2-aes256gcm16-dh20-pfs-tunnel-v4-icmp-r2] session complete: 1806 packets, 101.9s, delete=True
+2026-09-07 01:04:45,154 INFO    __main__: [42/42] s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging-r4
+2026-09-07 01:04:46,410 INFO    testbed.peers: peer pair 7260ad4dc4 up: ipsec-tb-7260ad4dc4-left / ipsec-tb-7260ad4dc4-right
+2026-09-07 01:04:46,605 INFO    testbed.capture: [ipsec-tb-7260ad4dc4-left] capturing esp or ah or udp port 500 or udp port 4500 on eth0
+2026-09-07 01:04:47,166 INFO    testbed.tunnel: [ipsec-tb-7260ad4dc4-left] SA up: ike=AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_384 child=AES_GCM_16-256
+2026-09-07 01:04:47,166 INFO    testbed.traffic.base: generating messaging traffic for 90s (seed 20260906)
+2026-09-07 01:06:21,844 INFO    testbed.capture: [ipsec-tb-7260ad4dc4-left] captured 62 packets to ..\dataset\sessions\s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging-r4\capture.pcap
+2026-09-07 01:06:22,759 INFO    testbed.orchestrator: [s059-ikev2-aes256gcm16-dh20-pfs-transport-v6-messaging-r4] session complete: 62 packets, 97.6s, delete=True
+2026-09-07 01:06:22,763 INFO    __main__: batch finished: 15 completed, 0 failed, 27 skipped, 1576s
