@@ -78,6 +78,7 @@ def render_swanctl_conf(cfg: SessionConfig, side: Side) -> str:
         local_ts=cfg.local_ts(side),
         remote_ts=cfg.remote_ts(side),
         mode=cfg.mode.value,
-        lifetime_s=cfg.lifetime_s,
+        rekey_time_s=cfg.rekey_time_s,
+        over_time_s=cfg.over_time_s,
         psk=cfg.psk,
     )

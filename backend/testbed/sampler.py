@@ -253,6 +253,40 @@ def sample_configs(
     return configs
 
 
+def with_repeats(configs: Sequence[SessionConfig], repeats: int) -> list[SessionConfig]:
+    """Expand each configuration into *repeats* traffic runs. Step 8.3.
+
+    PRD section 9.3 wants at least 200 sessions and the pairwise sample is 62
+    configurations, so the remainder has to come from running each one more than
+    once -- which is only worth doing if the runs actually differ. Each repeat
+    gets its own ``seed``, and every traffic generator draws its within-class
+    parameters from that (see ``traffic/base.generate_traffic``), so run 2 of a
+    configuration is a different VoIP call rather than a copy of run 1. The
+    tunnel configuration is deliberately *identical* across a config's repeats:
+    that is what makes "split by configuration" (step 9.5) a meaningful
+    boundary, and a repeat that changed the crypto would be a different
+    configuration wearing the same name.
+
+    Run 1 keeps the base name and seed, so a batch run with ``repeats=1`` is
+    byte-identical to one that never passed the flag and an existing manifest
+    still resumes.
+    """
+    if repeats < 1:
+        msg = f"repeats must be at least 1, got {repeats}"
+        raise ValueError(msg)
+
+    expanded: list[SessionConfig] = []
+    for config in configs:
+        expanded.append(config)
+        for run in range(2, repeats + 1):
+            expanded.append(
+                config.model_copy(
+                    update={"name": f"{config.name}-r{run}", "seed": config.seed + run - 1}
+                )
+            )
+    return expanded
+
+
 def coverage_report(matrix: Matrix, rows: Iterable[Row]) -> dict[str, dict[Any, int]]:
     """How many times each value of each dimension appears in ``rows``.
 

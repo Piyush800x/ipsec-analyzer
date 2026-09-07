@@ -22,6 +22,19 @@ ARG TCPDUMP_VERSION=4.99.3-1
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Two packages here exist solely so swaks can reach an IPv6 server, and both
+# were found by watching an IPv6 email session produce an empty capture:
+#
+#   libio-socket-inet6-perl -- swaks refuses IPv6 with "requires
+#     IO::Socket::INET6". It tests for that module by name and will not fall
+#     back to IO::Socket::IP, which the base image already has.
+#   netbase -- provides /etc/protocols, which debian-slim omits.
+#     IO::Socket::INET6 calls getprotobyname('tcp') and fails with
+#     "Bad protocol 'tcp'" without it. IO::Socket::IP does not, which is why
+#     nothing else in the image had noticed the file was missing.
+#
+# Without both, every IPv6 email session yields a capture containing no mail,
+# labelled as though it contained mail.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         "strongswan-swanctl=${STRONGSWAN_VERSION}" \
@@ -37,6 +50,8 @@ RUN apt-get update \
         ffmpeg \
         curl \
         swaks \
+        libio-socket-inet6-perl \
+        netbase \
         iperf3 \
         python3-minimal \
         python3-aiosmtpd \

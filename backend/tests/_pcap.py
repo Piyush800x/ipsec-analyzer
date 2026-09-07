@@ -23,13 +23,33 @@ _ETH_SRC = bytes.fromhex("aaaaaaaaaaaa")
 _ETH_DST = bytes.fromhex("bbbbbbbbbbbb")
 
 
-def write_pcap(path: Path, linktype: int, frames: list[bytes], *, snaplen: int = 65535) -> None:
-    """Write *frames* as a classic pcap file, one second apart, starting at t=0."""
+def write_pcap(
+    path: Path,
+    linktype: int,
+    frames: list[bytes],
+    *,
+    snaplen: int = 65535,
+    interval_s: float = 1.0,
+) -> None:
+    """Write *frames* as a classic pcap file, *interval_s* apart, starting at t=0.
+
+    The one-second default is what most of these tests want: it makes a frame
+    index and a timestamp the same number, which keeps assertions readable.
+
+    Anything exercising Track B's windowing needs a smaller interval. LLD §7.6
+    scores a 10-second window only above 20 packets, so at one second per frame
+    no window in a synthetic capture can ever be scored -- a test written that
+    way gets an empty result and reads as a broken windower rather than as a
+    capture too sparse to window.
+    """
     with path.open("wb") as fh:
         fh.write(struct.pack("<IHHiIII", _PCAP_MAGIC, 2, 4, 0, 0, snaplen, linktype))
         for i, frame in enumerate(frames):
             caplen = min(len(frame), snaplen)
-            fh.write(struct.pack("<IIII", i, 0, caplen, len(frame)))
+            offset = i * interval_s
+            fh.write(
+                struct.pack("<IIII", int(offset), round(offset % 1 * 1_000_000), caplen, len(frame))
+            )
             fh.write(frame[:caplen])
 
 

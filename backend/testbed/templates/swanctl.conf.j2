@@ -35,7 +35,7 @@ connections {
         # IKE SA lifetime. Negotiated and therefore observable on IKEv1; on
         # IKEv2 this is local policy only and no parser can recover it
         # (RFC 7296, LLD 6.4).
-        rekey_time = {{ lifetime_s }}s
+        rekey_time = {{ rekey_time_s }}s
 
         # strongSwan jitters rekeying by up to over_time, which defaults to 10%
         # of rekey_time -- exactly the tolerance step 9.3 measures against. Zero
@@ -43,6 +43,30 @@ connections {
         # the configuration rather than a coin flip. Real deployments do jitter;
         # a labelled dataset should not.
         rand_time = 0s
+
+        # over_time is the gap between rekeying and hard expiry, and it too
+        # defaults to 10% of rekey_time. It matters twice over.
+        #
+        # First, IKEv1 puts the *hard* lifetime on the wire -- rekey_time plus
+        # over_time -- so with the default, strongSwan proposes 95040s for a
+        # configured 86400s and every label disagrees with every capture by
+        # exactly 10%. Found by verifying step 8.1's pilot against a real
+        # aggressive-mode negotiation.
+        #
+        # Second, and less obviously: strongSwan *deletes* an SA that has not
+        # rekeyed within rekey_time + over_time. Setting over_time to zero,
+        # which was the first attempt at the problem above, leaves no window at
+        # all -- the SA hard-expires at the same instant it tries to rekey. A
+        # 300-second tunnel captured for 700 seconds died at t=300 with the
+        # rekey exchange on the wire and nothing after it.
+        #
+        # So the hard lifetime is held at the configured value by subtracting a
+        # small fixed window from the rekey time rather than by removing the
+        # window. `lifetime_s` therefore means what a parser reads off the wire,
+        # which is what labels.json claims it is, and the SA still has ten
+        # seconds in which to rekey -- three orders of magnitude more than a
+        # CREATE_CHILD_SA needs.
+        over_time = {{ over_time_s }}s
 
         local {
             auth = psk
@@ -65,8 +89,14 @@ connections {
                 # the capture and put the IKE exchange outside the PCAP.
                 start_action = none
 
-                rekey_time = {{ lifetime_s }}s
+                rekey_time = {{ rekey_time_s }}s
                 rand_time = 0s
+                {#- No over_time here: strongSwan accepts it on the connection
+                    only, and a child block carrying it fails the whole
+                    connection with "unknown option: over_time". The child's
+                    hard lifetime is proposed inside encrypted Quick Mode and
+                    is unobservable anyway; only rekey_time, which sets the
+                    interval step 9.3 measures, matters here. #}
 
                 # Rekey on time only. A byte- or packet-triggered rekey would
                 # make the observed rekey interval depend on the traffic class,

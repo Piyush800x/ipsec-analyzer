@@ -31,6 +31,7 @@ from itertools import pairwise
 from typing import Final
 
 from analyzer.core.schema import Attribute, Evidence
+from analyzer.ingest.flow import SAPair
 from analyzer.ingest.reader import PacketRecord
 
 GAP_TOLERANCE: Final = 0.02
@@ -144,12 +145,55 @@ def anti_replay_window_size() -> Attribute[int]:
     )
 
 
-def observed_rekey_s(spi_first_seen: Sequence[tuple[int, float]]) -> Attribute[int]:
-    """Time between successive SPIs appearing on one endpoint pair. FR-4.6.
+def spi_series(sa_pairs: Sequence[SAPair]) -> dict[tuple[str, str], list[tuple[int, float]]]:
+    """Each *directed* endpoint pair's SPIs, in the order they first appeared.
 
-    *spi_first_seen* is ``(spi, first timestamp)`` in appearance order. Two
-    SPIs are one rekey; one SPI is not evidence that no rekey happens, only
-    that none happened inside the capture window.
+    This is the input ``observed_rekey_s`` needs, and computing it requires the
+    whole capture rather than one SA -- which is the correction this function
+    exists to make.
+
+    A rekey replaces the Child SA, and a new Child SA means a new SPI, which
+    ``ingest.assemble_flows`` groups into an entirely **separate** ``SAPair``.
+    So the successive generations of one tunnel are never visible from inside a
+    single ``SAPair``; what *is* inside one is its forward and reverse SPI, and
+    those two belong to the same generation and appear at the same instant.
+
+    Reading a rekey interval off one ``SAPair`` therefore measures the gap
+    between the two directions of a single SA coming up -- which is
+    approximately zero, every time, for every capture. Grouping by direction
+    across pairs is what makes successive entries successive *generations*.
+
+    Directed rather than unordered on purpose: an unordered key interleaves the
+    two directions, and since both directions of a generation start together,
+    every other interval in the merged series is a spurious zero.
+    """
+    series: dict[tuple[str, str], list[tuple[int, float]]] = {}
+    for pair in sa_pairs:
+        for flow in (pair.forward, pair.reverse):
+            if flow is None:
+                continue
+            series.setdefault((flow.key.src, flow.key.dst), []).append(
+                (flow.key.spi, flow.start_ts)
+            )
+    for entries in series.values():
+        entries.sort(key=lambda entry: entry[1])
+    return series
+
+
+def observed_rekey_s(spi_first_seen: Sequence[tuple[int, float]]) -> Attribute[int]:
+    """Time between successive SPIs appearing in **one direction**. FR-4.6.
+
+    *spi_first_seen* is ``(spi, first timestamp)`` for a single directed
+    endpoint pair, in appearance order -- see ``spi_series``, which is how a
+    caller should build it. Two SPIs are one rekey; one SPI is not evidence
+    that no rekey happens, only that none happened inside the capture window.
+
+    Passing both directions of a tunnel here is a caller error that this
+    function cannot detect: the two SPIs of one generation appear together, so
+    the merged series is full of zero-length intervals and the median collapses
+    to zero -- reported as an INFERRED rekey interval of 0 seconds at 0.95
+    confidence, which is a confident falsehood of exactly the kind this project
+    exists to avoid.
     """
     if len(spi_first_seen) < 2:
         return Attribute.unavailable(

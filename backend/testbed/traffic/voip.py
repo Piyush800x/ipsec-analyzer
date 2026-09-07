@@ -16,9 +16,10 @@ does, rather than varying them to look busier.
 from __future__ import annotations
 
 import asyncio
+import random
 
 from testbed.peers import PeerHandle
-from testbed.traffic.base import SETTLE_S, start_background, udp_sink
+from testbed.traffic.base import SETTLE_S, host_for_url, start_background, udp_sink
 
 RTP_PORT_LEFT = 5004
 RTP_PORT_RIGHT = 5006
@@ -26,8 +27,25 @@ RTP_PORT_RIGHT = 5006
 PACKET_BYTES = 172
 """12 bytes of RTP header plus 160 bytes of G.711 payload: one 20ms frame."""
 
+PTIME_CHOICES = (20, 30, 40)
+"""Packetisation intervals in milliseconds, varied per run (step 8.3).
 
-def _stream(target: str, port: int) -> str:
+Real deployments differ on ptime, and it moves both axes a classifier reads --
+20ms gives 50 packets/second of 172 bytes, 40ms gives 25 of 332. What does not
+change is the defining property: one constant-rate stream in each direction
+with a single packet size. That is still nothing like any other class here.
+
+Frequency is deliberately *not* varied. A different sine tone through G.711
+produces identical packet geometry, so it would add a label the features cannot
+see -- variation that looks like diversity in the manifest and is not."""
+
+
+def _payload_bytes(ptime_ms: int) -> int:
+    """RTP header plus one G.711 frame of *ptime_ms*, at 8000 samples/second."""
+    return 12 + 8 * ptime_ms
+
+
+def _stream(target: str, port: int, ptime_ms: int) -> str:
     """An ffmpeg command emitting a G.711 RTP stream at 50 packets/second.
 
     ``-re`` paces the encoder at real time; without it ffmpeg emits the whole
@@ -38,12 +56,13 @@ def _stream(target: str, port: int) -> str:
         "ffmpeg -hide_banner -loglevel error -re "
         "-f lavfi -i sine=frequency=440:sample_rate=8000 "
         "-ar 8000 -ac 1 -c:a pcm_mulaw -payload_type 0 "
-        f"-f rtp rtp://{target}:{port}?pkt_size={PACKET_BYTES}"
+        f"-f rtp rtp://{host_for_url(target)}:{port}?pkt_size={_payload_bytes(ptime_ms)}"
     )
 
 
-async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None:
+async def generate(left: PeerHandle, right: PeerHandle, duration_s: int, seed: int) -> None:
     """Run a bidirectional call between the peers for ``duration_s``."""
+    ptime_ms = random.Random(seed).choice(PTIME_CHOICES)
     sinks = [
         await start_background(right, udp_sink(RTP_PORT_RIGHT), name="voip-sink-right"),
         await start_background(left, udp_sink(RTP_PORT_LEFT), name="voip-sink-left"),
@@ -51,8 +70,12 @@ async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None
     await asyncio.sleep(SETTLE_S)
 
     streams = [
-        await start_background(left, _stream(right.traffic_addr, RTP_PORT_RIGHT), name="voip-left"),
-        await start_background(right, _stream(left.traffic_addr, RTP_PORT_LEFT), name="voip-right"),
+        await start_background(
+            left, _stream(right.traffic_addr, RTP_PORT_RIGHT, ptime_ms), name="voip-left"
+        ),
+        await start_background(
+            right, _stream(left.traffic_addr, RTP_PORT_LEFT, ptime_ms), name="voip-right"
+        ),
     ]
     try:
         await asyncio.sleep(duration_s)
