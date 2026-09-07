@@ -5,10 +5,26 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 data/
-models/*.pkl
-models/*.joblib
-models/*.onnx
-models/*.pt
 *.db
 *.sqlite*
 .env
+
+# models/ is deliberately NOT excluded, because `MODEL_DIR` in
+# docker-compose.offline.yml points the running backend at /app/models and the
+# Dockerfile COPYs it there. Without the artefacts the image builds clean,
+# starts clean, and reports every model-backed attribute as UNAVAILABLE with a
+# reason — `track_b/service.py` degrades rather than fails, by design — so a
+# missing model directory is invisible from outside. MT-26 opens the image and
+# looks.
+#
+# `*.pt` stays excluded, and it is the one exclusion here that is a decision
+# rather than housekeeping. `traffic_cnn.pt` is the CNN, and inference
+# deliberately loads the LightGBM booster instead: loading the CNN would make
+# torch a runtime dependency of the API and of this image, for a model whose
+# scores `models/metrics.json` already records. It is gitignored for the same
+# reason, so a clean clone does not have it either. Nothing at run time reads
+# it.
+models/*.pt
+models/*.pkl
+models/*.joblib
+models/*.onnx

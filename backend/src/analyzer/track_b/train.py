@@ -227,7 +227,7 @@ def _train_mode_classifier(
 
     from analyzer.ingest.flow import assemble_flows
     from analyzer.ingest.reader import read_packets
-    from analyzer.track_b.mode import extract_mode_features
+    from analyzer.track_b.mode import ModeBaseline, extract_mode_features, session_geometry
 
     fold_of = dict(
         zip(
@@ -237,9 +237,12 @@ def _train_mode_classifier(
         )
     )
 
-    rows: list[list[float]] = []
-    y: list[int] = []
-    folds: list[str] = []
+    # Collected in one pass, then turned into vectors in a second: two of the
+    # six features are offsets against a baseline that is itself fitted from
+    # the training fold, so no feature vector can be built until every session
+    # has been seen. Re-reading 248 captures to do it would cost a second seven
+    # minutes for data already in hand.
+    collected: list[dict[str, Any]] = []
     for session_dir in sorted(p for p in sessions_dir.iterdir() if p.is_dir()):
         labels_path = session_dir / "labels.json"
         pcap_path = session_dir / "capture.pcap"
@@ -272,17 +275,48 @@ def _train_mode_classifier(
         if distribution is None:
             continue
 
-        mode_features = extract_mode_features(pairs[0], packets, distribution)
-        rows.append(mode_features.vector())
-        y.append(MODE_LABELS.index(mode))
-        folds.append(fold)
+        ip_version, min_len, modal_len = session_geometry(pairs[0])
+        collected.append(
+            {
+                "pair": pairs[0],
+                "packets": packets,
+                "distribution": distribution,
+                "traffic_class": ground_truth["expected"]["traffic_class"],
+                "ip_version": ip_version,
+                "min_len": min_len,
+                "modal_len": modal_len,
+                "mode": mode,
+                "fold": fold,
+            }
+        )
 
-    if not rows:
+    if not collected:
         return {"trained": False, "reason": "no sessions carried an operating_mode label"}
 
+    # The baseline is what a class looks like with *no* inner header, so it is
+    # fitted from transport sessions only -- and from the training fold only,
+    # because a baseline that had seen the test fold's geometry would be
+    # leakage of exactly the kind the configuration split exists to prevent.
+    baseline = ModeBaseline.fit(
+        [
+            (row["traffic_class"], row["ip_version"], row["min_len"], row["modal_len"])
+            for row in collected
+            if row["fold"] != "test" and row["mode"] == "transport"
+        ]
+    )
+    log.info(
+        "mode baseline fitted from %d transport training sessions, %d (class, ip) cells",
+        sum(1 for r in collected if r["fold"] != "test" and r["mode"] == "transport"),
+        len(baseline.min_len),
+    )
+
+    rows = [
+        extract_mode_features(row["pair"], row["packets"], row["distribution"], baseline).vector()
+        for row in collected
+    ]
     matrix = np.array(rows, dtype=np.float32)
-    targets = np.array(y, dtype=np.int64)
-    fold_array = np.array(folds)
+    targets = np.array([MODE_LABELS.index(row["mode"]) for row in collected], dtype=np.int64)
+    fold_array = np.array([row["fold"] for row in collected])
 
     train_mask = fold_array != "test"
     test_mask = fold_array == "test"
@@ -292,7 +326,7 @@ def _train_mode_classifier(
             "reason": "the split left the mode classifier a fold with no rows",
         }
 
-    model = train_mode(matrix[train_mask], targets[train_mask])
+    model = train_mode(matrix[train_mask], targets[train_mask], baseline=baseline)
     evaluation = evaluate_mode(model, matrix[test_mask], targets[test_mask])
     model.save(models_dir / "mode_lightgbm.txt")
     log.info("mode classifier test:\n%s", evaluation.summary())
@@ -302,6 +336,7 @@ def _train_mode_classifier(
         "sessions": len(rows),
         "test_sessions": int(test_mask.sum()),
         "feature_names": ModeFeatures.names(),
+        "baseline_cells": len(baseline.min_len),
         "test": _evaluation_dict(evaluation),
     }
 

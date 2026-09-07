@@ -17,6 +17,297 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Added — Phase 11 finished: 11.5 and 11.6 land, and MT-08/09 are all that is left
+
+**11.5 Demo captures** — `testbed/demo_captures.py`, `dataset/demo/`
+
+The two PRD §16 tunnels, frozen and committed: `demo-tunnel-a` (IKEv1
+aggressive, 3DES-CBC, HMAC-SHA1-96, DH-2, PFS off, 24-hour lifetime, transport,
+VoIP) and `demo-tunnel-b` (IKEv2, AES-256-GCM, DH-19, PFS on, 1-hour lifetime,
+tunnel, the same call). 13117 and 13248 packets; 3.1 and 3.5 MB.
+
+**Done when — both committed, and neither appears in any training split.**
+
+The second half needed care, because the matrix *already* contains both tunnels
+as `weak-reference` and `hardened-reference`, and the sampler generates them
+regardless of what pairwise picks. Measured on the real split, `weak-reference`
+is in the **test** fold and `hardened-reference` is in the **calibration** fold
+— so demoing on the matrix fixtures would have meant demonstrating the
+classifier's confidence on the capture that fitted its calibrator.
+
+So the demo tunnels are their own configurations, in their own directory, with
+their own seed, and `tests/test_demo_captures.py` asserts the property against
+`split_configs` rather than trusting it. It carries a control —
+`test_the_reference_fixtures_do_land_in_a_fold` — because otherwise the
+assertion would pass just as well against a splitter that placed nothing at all.
+
+What is *not* claimed: the tunnel parameters are PRD §16's and therefore
+identical to those two dataset configurations. The demo is a tool being
+demonstrated, not a held-out evaluation, and the module docstring says so.
+
+**11.6 Demo rehearsal** — `scripts/demo_rehearsal.py`, and it passes
+
+**3/3 clean runs, 21.1–21.2 s each** against PRD §16's two-minute target.
+
+The harness drives PRD §16's sequence over HTTP and **asserts on each step**
+rather than timing it. A rehearsal that only reports a number tells you the
+stack was fast, not that the demo works — so it checks that tunnel A's findings
+are not empty and B's list is shorter, that B scores *higher*, that the
+classifier actually returned a class, that the report really begins `%PDF`.
+
+| step | result | |
+|---|---|---|
+| 1. tunnel A (weak) | score **25**, 7 findings, 1 critical | 8.4 s |
+| 2. traffic classifier | **voip at confidence 1.0, exposure 100** | 0.0 s |
+| 3. tunnel B (hardened) | score **80** (+55), 2 findings | 8.4 s |
+| 3b. comparison | delta 55, 5 findings only in A | 2.1 s |
+| 4. executive report | 17 KB PDF | 2.4 s |
+
+The three runs agreeing to the finding is NFR-4 visible from outside.
+
+**Still needs a person, and MT-19 says so:** this drives the API, not the
+browser. It does not prove the threat matrix lights up, or that the progress bar
+moves rather than jumping from 0 to 100.
+
+**11.8 was not done.** It is a screen recording with narration and needs someone
+to record it. `docs/demo-script.md` is the shot list and narration it would be
+recorded from, with PRD §4.1's metadata-exposure line written out, but the video
+does not exist.
+
+### Fixed — `MODEL_DIR` had never worked, on any deployment
+
+Found by running the rehearsal against the offline stack, which is the first
+time this project has run its own API with models on disk.
+
+`Settings.model_dir` existed. `docker-compose.offline.yml` set it. And
+`JobRunner` never passed it to `analyse_capture`, so the pipeline defaulted it
+to `None` — and `None` means *no models*.
+
+**Nothing raised, and nothing could.** `track_b/service.py` is deliberately
+built to degrade: no model directory means every model-backed attribute comes
+back UNAVAILABLE **with a reason**, and the run succeeds. So the symptom was a
+complete, internally consistent, entirely plausible assessment saying
+
+> no trained model is available for this deployment. The classifier
+> (implementation-plan steps 9.6-9.9) requires the labelled dataset from
+> Phase 8, which has not been generated.
+
+on a deployment where the dataset *had* been generated and the models were
+sitting in `backend/models/`. The note read as correct, because it is exactly
+what a model-free build should say. `model_versions` was `{}` and the
+metadata-exposure score was 0 — which the schema documents as "an absence of
+evidence, not evidence that the tunnel leaks nothing", and which is precisely
+the sentence that made it look handled.
+
+This is the failure mode this project's whole design is arranged against, and it
+survived because the design worked: the degradation was so graceful that nothing
+distinguished a misconfiguration from an honest gap.
+
+`tests/test_api_jobs.py::test_the_configured_model_dir_reaches_the_pipeline` now
+holds that path open. It asserts at the wiring rather than through a real model,
+because a test needing trained artefacts would be skipped in exactly the build
+where those artefacts are missing.
+
+### Fixed — an assessment that ran models recorded that it had not
+
+The same run that found `MODEL_DIR` unwired found its twin one layer up. The
+pipeline builds the inference service and uses it, and then calls
+`engine.evaluate` **without** `model_versions`, so every assessment ever
+produced carried `{}`.
+
+`{}` is not an unset field. `core/schema.py` documents it as meaning *no
+inference ran*, and the technical report acts on that: it prints
+`Models: none loaded` and renders a whole section explaining that the
+model-backed fields were unavailable in this build. So on the demo capture the
+report stated, in print, that no model had run — on the same page as a
+classifier result of VoIP at confidence 1.0.
+
+Fixed by passing `service.model_versions`, which hashes the artefacts on disk
+rather than trusting a string a training run wrote beside them. The technical
+report now reads:
+
+```
+Models: traffic_classifier=sha256:6c474eea866e01d1
+        mode_classifier=sha256:3a7e7519bd3b8fcd
+        calibration=sha256:d8ad6131a24133b9
+```
+
+`test_an_assessment_records_the_models_that_produced_it` asserts **both**
+directions — empty for a build with no artefacts, populated for one with them —
+because it was the threading that broke, and a one-sided test passes against a
+pipeline that hardcodes `{}`.
+
+### Fixed — the offline stack had never been started, and four things were wrong
+
+Step 11.4 shipped a compose file, two Dockerfiles and a claim. MT-18 says
+"compose topology is the kind of claim that is either true or quietly false, and
+only a run tells you which". The run says: false, four times over — and every
+one of them produced a stack that came up and looked right.
+
+1. **`frontend/` had no `.dockerignore` at all.** npm on Windows materialises
+   its cache under the reserved name `NUL`; the Docker daemon cannot read that
+   path, so the image would not build (`error from sender: open frontend\NUL:
+   Incorrect function`). Because `NUL/` is gitignored it does not appear in
+   `git status`. The same missing file also meant the build stage's `COPY . .`
+   was overwriting the `node_modules` the deps stage had just installed with
+   whatever the host had — a Linux image carrying a Windows install of anything
+   with a native binding.
+2. **The compose `command:` ran `uv run`.** `uv run` re-resolves the project
+   environment before executing, which needs an index, which needs DNS — on an
+   `internal: true` network with no route anywhere. It failed with "Could not
+   connect, are you offline?", the right answer to the wrong question. The image
+   already puts `/app/.venv/bin` on `PATH`; `alembic` and `uvicorn` are there
+   without it.
+3. **That `command:` was a YAML `>` folded block, and folding does not fold
+   everything.** A line indented further than the first keeps its newline, so
+   `sh` received two commands and the second began `--host`. Symptom:
+   `sh: 4: --host: not found`.
+4. **`libgomp1` was missing from the backend image.** It is LightGBM's OpenMP
+   runtime and both trained models are LightGBM boosters, so `import lightgbm`
+   raised `libgomp.so.1: cannot open shared object file` — caught, logged, and
+   degraded to UNAVAILABLE, exactly as in the defect above.
+
+One more turned up on the way: **`backend/Dockerfile` never copied `models/`
+at all**, so `MODEL_DIR` pointed at a directory that did not exist. It was
+written before the artefacts were committed — correct when written, silently
+wrong afterwards. **MT-26** now opens the image and looks.
+
+`backend/.dockerignore` also excluded `models/*.pt`, and that one turned out
+*not* to be a defect: `traffic_cnn.pt` is the CNN, inference deliberately loads
+the LightGBM booster so that torch is not a runtime dependency, and the file is
+gitignored for the same reason — a clean clone does not have it either. The
+exclusion is kept, now with the reasoning written next to it rather than left
+to be rediscovered.
+
+### Added — the `messaging` class is learnable, by making the generator honest
+
+Resolves the open spec question recorded below, by its first option: enrich the
+generator rather than lower the floor.
+
+`messaging` contributed **zero training rows**. At roughly one packet per second
+a 10-second window held 7–10 packets against LLD §7.6's floor of 20, so every
+window was discarded and the traffic classifier was silently a six-class model.
+
+**It was not fixed by making messaging faster.** Raising the rate until the
+windows cleared the floor would be meeting a target by changing the data. It was
+fixed by modelling what a real messaging connection actually carries — all of it
+genuinely messaging traffic, and none of it in the generator:
+
+* chat states (XEP-0085) — the "typing…" indicator, around each message;
+* delivery receipts (XEP-0184) and read markers (XEP-0333) — the two ticks and
+  the blue tick, one of each **per message**;
+* message bursts, because people send "hey", then "you there", then the point;
+* keepalive pings, because the connection is long-lived and NAT bindings are not;
+* roster presence, because the connection is client-to-server and carries every
+  contact's state changes, not only the open conversation.
+
+The 1–12 second idle gap between conversational turns is **unchanged**. The
+enrichment clusters small packets around each turn; it does not fill the
+silences that define the class.
+
+```
+before:   61 packets ->  0 windows
+after:   678 packets -> 17 windows, 28-116 packets each
+```
+
+32 messaging sessions regenerated, 0 failures. All seven of PRD §9.2's classes
+now reach the model, `metrics.json`'s `classes_absent` is empty, and the model
+card no longer opens with a class-count banner because there is nothing left to
+warn about.
+
+**The first draft of the enrichment was worse than the original**, and it is
+worth recording because it looked fine. It replied per *message* rather than per
+*turn*, so a three-message burst drew three replies, each opening a turn of up to
+three more. Measured on loopback: 28 packets in the first 10-second window, 1565
+in the ninth — an exponential ramp that still looked like ordinary chat traffic
+from the outside, and that would have destroyed the class's signature in the
+opposite direction. `tests/test_messaging_peer.py` asserts both bounds: every
+window clears the floor, *and* the rate does not compound.
+
+### Fixed — ML-2 was reading the one length the inner header cannot move
+
+Step 9.9's mode classifier scored **0.7273** against its 0.90 target. Measuring
+its four features across all 216 sessions said why, and none of it was the
+model's fault.
+
+**Two of the four features are constant.** `spi_pairs_per_endpoint` takes exactly
+one distinct value across every session (two SPIs over two endpoints — always
+1.0), and `cleartext_ratio` takes exactly one (0.0; there is no correlated
+cleartext on a private bridge). They are LLD §7.3's, and would carry signal on a
+real capture with several SAs and side traffic. Here they carry none. Kept, and
+now documented as carrying none, which is more useful than dropping them.
+
+**The remaining length feature measures the wrong length.** Tunnel mode adds 20
+bytes (IPv4) or 40 (IPv6) to every packet — but the path MTU caps the packet, so
+for any class that saturates the MTU the header *displaces* payload instead of
+adding to it. Median tunnel-minus-transport difference in modal ESP length:
+
+```
+icmp v4  +8    voip v4 +30    video v4 +18    web v4  -4    file_transfer v4  0
+icmp v6 +40    voip v6 +40    video v6 +60    web v6   0    file_transfer v6  0
+```
+
+Three of the six classes — `web`, `file_transfer` and `email`, which is most of
+the bulk traffic there is — show no signal at all. A classifier cannot beat
+chance on them, and 0.73 is what that looks like.
+
+**The minimum length carries what the maximum hides.** The smallest packets in
+any flow are pure acknowledgements, keepalives and control: far enough below the
+MTU that the inner header adds to them rather than displacing anything. The same
+measurement on `min(esp_payload_len)` is positive for **every** class in both IP
+versions — +8 to +60, tracking the 20- and 40-byte headers — including all three
+where the modal length is flat.
+
+**And the baseline those offsets are measured against was invented.**
+`EXPECTED_MODAL_LEN` was a hand-written table of round numbers. Measured against
+the corpus it is wrong by up to **672 bytes** (`web` written as 800, observed at
+1472) on an effect that is 20. A baseline whose error is thirty times the signal
+does not blur a feature, it replaces it. `ModeBaseline` is now *fitted*: the
+median transport-mode geometry per (traffic class, IP version), from the training
+fold only, stored in `mode_lightgbm.meta.json` and loaded with the model so the
+offsets cannot silently be computed against nothing at inference time.
+
+| | accuracy |
+|---|---|
+| four features, hardcoded table | 0.7500 |
+| plus `min_len_offset` and `inner_header_bytes`, fitted baseline | 0.9231 |
+| final, retrained on all 248 sessions with ML-1 in the loop | **1.0000** |
+
+Step 9.9's target is met. **1.0000 over 52 held-out sessions is reported with the
+same caveat as ML-1's**, and the model card carries it: `min_len_offset` is close
+to a *direct measurement* of the thing being classified rather than a learned
+proxy for it, and this testbed presents one clean SA pair at a fixed MTU. Real
+traffic has several SAs, varying path MTUs and fragmentation, and the baseline is
+fitted to these generators. Step 9.12 is still the only measurement that would
+say by how much.
+
+### Verified — MT-15 and MT-24, which had never been run
+
+- **MT-15** (step 3.2): the reader's packet count against tshark on *real*
+  captures, rather than the synthetic pcaps the automated suite builds. Run
+  against the pinned tshark 4.4.18 inside the backend image rather than a host
+  binary, which is stricter — that is the version Track A parses. Four captures
+  spanning both IP versions, both IKE versions and three cipher suites:
+  7120/7120, 7123/7123, 678/678, 684/684. Exact.
+- **MT-24** (step 9.8): `docs/model-card.md` regenerates byte-identically from
+  `models/metrics.json`. This also fixed a defect of exactly the kind MT-24
+  exists to catch — the Limitations section read "Seven classes, closed set"
+  while the model had six. The count is now taken from the artefact.
+
+### Not verified — what is still open
+
+- **Step 9.12, external validation, remains unmeasured.** ISCXVPN2016 has not
+  been downloaded. Every internal score in this release measures how distinct
+  this testbed's generators are; none of them is evidence of generalisation. The
+  model card says so in its own section rather than in a footnote.
+- **MT-08 and MT-09** still need a Neon connection string, which was not
+  available here. They are the only two rows in `manualtesting.md` still marked
+  **Not run**.
+- **Step 11.8, the demonstration video, does not exist.** `docs/demo-script.md`
+  is what it would be recorded from.
+- **The dashboard has not been walked by eye on the offline stack.** The
+  rehearsal drives the API; MT-19 records what that leaves unproven.
+
 ### Fixed — PFS inference reported the *opposite* of the truth for every ECP group
 
 Found by running step 9.4 against the one capture in existence that contains
@@ -95,6 +386,12 @@ same defect class as a wrong value, in the field whose entire job is to say why
 there isn't one. They now describe the division of labour instead.
 
 ### Added — Phase 8 generated, Phase 9 trained: the measured results
+
+> **Superseded in part.** Two numbers here are no longer this build's: ML-2's
+> 0.7273 (now 1.0000 — the mode classifier was reading the wrong length) and the
+> six-class traffic classifier (now seven — messaging contributes rows). Both are
+> at the top of this file. The rest of this entry, including why a macro-F1 of
+> 1.0000 is a reason to investigate rather than to celebrate, still stands.
 
 **The dataset.** 248 sessions, 0 failures, 14 GB, generated by six concurrent
 shards in about 27 minutes of wall clock. 62 configurations x 4 traffic runs,
@@ -177,6 +474,12 @@ one. It now logs `[n/total] session-name` as it goes, with `--quiet` to
 suppress it.
 
 ### Open spec question — LLD §7.6's window floor makes PRD §9.2's sparsest class unlearnable
+
+> **Resolved** by resolution 1 below — the messaging generator was enriched, not
+> the floor lowered. See "the `messaging` class is learnable, by making the
+> generator honest" at the top of this file. Left in place because the reasoning
+> is what makes the resolution defensible, and because the measurements below
+> are what a future change to the windowing would have to argue against.
 
 Found by counting scorable windows per class across the finished dataset, and
 it is a conflict between two specifications rather than a bug in either

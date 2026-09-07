@@ -1,0 +1,44 @@
+# The build stage does `COPY . .` on top of the node_modules it installed in
+# the deps stage, so anything not excluded here is not merely wasted context --
+# it lands in the image and can overwrite what the build needs.
+#
+# Three entries are load-bearing rather than tidy:
+#
+#   node_modules  the deps stage runs `npm ci` against the lockfile and the
+#                 build stage copies that result in. A host tree copied over it
+#                 replaces a Linux install with whatever the developer's OS
+#                 produced, which for any package with a native binding is the
+#                 wrong architecture.
+#   .next         a host build's output. `npm run build` would start from it,
+#                 so a stale local build could reach the image.
+#   NUL           not a typo. npm on Windows materialises its cache under this
+#                 reserved name when a command redirects to NUL from a POSIX
+#                 shell, and the Docker daemon cannot read the resulting path
+#                 at all: the build fails with "error from sender: open
+#                 frontend\NUL: Incorrect function" before any layer runs. It
+#                 is gitignored, so it is invisible in `git status` and looks
+#                 like nothing is wrong.
+node_modules
+.next
+out
+build
+NUL
+
+.git
+.gitignore
+coverage
+*.tsbuildinfo
+next-env.d.ts
+
+.env
+.env.*
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+.DS_Store
+Thumbs.db
+*.pem
+.vercel

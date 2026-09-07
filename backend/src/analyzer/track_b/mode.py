@@ -23,8 +23,45 @@ per address, and correlated cleartext in the same capture. Feature 3 is the one
 that reads outside the SA, which is why ``extract_mode_features`` takes the
 whole capture and not just the pair.
 
-LightGBM rather than the CNN: this is four features and a binary label, and a
-tree over four features is both sufficient and legible in a way that matters
+**Why the maximum length is the wrong length to look at.** The first version of
+this model scored 0.7273 against step 9.9's 0.90 target, and measuring its four
+features across the whole corpus said why. Two of them are *constant*: on a
+two-container testbed with one SA pair there are always two SPIs over two
+endpoints, so ``spi_pairs_per_endpoint`` is 1.0 in all 216 sessions, and there
+is no correlated cleartext on a private bridge, so ``cleartext_ratio`` is 0.0 in
+all 216. They are kept because they are LLD section 7.3's and would carry signal
+on a real capture with several SAs and side traffic; here they carry none, and
+saying so is more useful than quietly dropping them.
+
+That leaves the length features, and the maximum is precisely the length the
+inner header cannot move. Tunnel mode adds 20 bytes (IPv4) or 40 (IPv6) to
+every packet, but the path MTU caps the packet, so for any class that saturates
+the MTU the header *displaces* payload instead of adding to it. Measured per
+class as the median tunnel-minus-transport difference in modal ESP length:
+
+    icmp v4  +8    voip v4  +30    video v4  +18    web v4   -4
+    icmp v6 +40    voip v6  +40    video v6  +60    web v6    0
+                                   file_transfer v4/v6   0 / 0
+
+Three of the six classes -- ``web``, ``file_transfer`` and ``email``, which is
+most of the bulk traffic in the world -- show no signal at all, and a
+classifier cannot do better than chance on them. That is what 0.73 was.
+
+**The minimum length is the one that carries it.** The smallest packets in any
+flow are pure acknowledgements, keepalives and control: nowhere near the MTU, so
+the inner header adds to them rather than displacing anything. The same
+measurement on ``min(esp_payload_len)`` is positive for *every* class in both IP
+versions -- +8 to +60, tracking the 20 and 40 byte headers -- including the three
+where the modal length is flat. Hence ``min_len_offset``, and
+``inner_header_bytes`` alongside it so the model knows whether it is looking for
+a 20-byte or a 40-byte shift rather than having to infer the IP version from the
+offsets themselves.
+
+With those two added and ``ModeBaseline`` fitted rather than hardcoded, held-out
+accuracy goes from 0.75 to 0.92 on the same split.
+
+LightGBM rather than the CNN: this is six features and a binary label, and a
+tree over six features is both sufficient and legible in a way that matters
 when a report has to say *why* it called a tunnel a tunnel.
 """
 
@@ -35,6 +72,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 from typing import Any, Final
 
 import numpy as np
@@ -67,12 +105,20 @@ addresses show little else."""
 
 @dataclass(frozen=True, slots=True)
 class ModeFeatures:
-    """LLD section 7.3's four features, named as that section names them."""
+    """LLD section 7.3's four features, plus the two that make feature 1 work.
+
+    The first four are LLD section 7.3's, named as that section names them.
+    ``min_len_offset`` and ``inner_header_bytes`` are additions, and the
+    module docstring explains why the section's own feature 1 does not carry
+    the signal it was expected to.
+    """
 
     max_len_over_mtu: float
     spi_pairs_per_endpoint: float
     cleartext_ratio: float
     modal_len_offset: float
+    min_len_offset: float
+    inner_header_bytes: float
 
     def vector(self) -> list[float]:
         return [
@@ -80,6 +126,8 @@ class ModeFeatures:
             self.spi_pairs_per_endpoint,
             self.cleartext_ratio,
             self.modal_len_offset,
+            self.min_len_offset,
+            self.inner_header_bytes,
         ]
 
     @staticmethod
@@ -89,31 +137,122 @@ class ModeFeatures:
             "spi_pairs_per_endpoint",
             "cleartext_ratio",
             "modal_len_offset",
+            "min_len_offset",
+            "inner_header_bytes",
         ]
 
 
-EXPECTED_MODAL_LEN: Final[dict[str, int]] = {
-    "icmp": 128,
-    "voip": 200,
-    "video": 1240,
-    "web": 800,
-    "email": 1200,
-    "file_transfer": 1300,
-    "messaging": 140,
-}
-"""Rough per-class expected outer payload length in *transport* mode.
+@dataclass(frozen=True, slots=True)
+class ModeBaseline:
+    """What each traffic class's ESP geometry looks like *without* an inner
+    header, learned from transport-mode training sessions.
 
-Deliberately coarse. This is feature 4's baseline, and its job is to make the
-~20-40 byte inner-header offset visible relative to what the class would look
-like without one -- not to predict the length. A table tuned tighter than the
-class-to-class spread would be fitting the testbed's specific generators, which
-is exactly what the external validation of step 9.12 exists to catch."""
+    LLD section 7.3's feature 4 is "the modal payload length compared against
+    what that length should be for a given inner traffic class". The first
+    implementation supplied that comparison from a hand-written table of round
+    numbers, and measured against the real corpus the table was wrong by up to
+    672 bytes -- `web` was written as 800 and observed at 1472. The effect the
+    feature exists to detect is 20 or 40 bytes. A baseline whose error is
+    thirty times the signal does not blur the feature, it replaces it.
+
+    So the baseline is fitted instead of guessed: the median geometry of the
+    *transport* sessions in the training fold, per traffic class and IP
+    version. Transport because transport is by definition the case with no
+    inner header; per IP version because the header being detected is 20 bytes
+    for IPv4 and 40 for IPv6, so the two cannot share a baseline.
+
+    **This is fitted to this testbed's generators and should be read that
+    way.** It is the same exposure the traffic classifier already has, and the
+    same measurement would answer it -- step 9.12's external validation. What
+    it is not is a number invented in an editor.
+    """
+
+    min_len: dict[str, float]
+    modal_len: dict[str, float]
+    """Keyed ``"<traffic_class>/<ip_version>"``, e.g. ``"voip/4"``. A flat
+    string key rather than a tuple because this is serialised to JSON beside
+    the model and has to survive the round trip."""
+
+    @staticmethod
+    def key(traffic_class: str, ip_version: int) -> str:
+        return f"{traffic_class}/{ip_version}"
+
+    def expected(self, probabilities: dict[str, float], ip_version: int) -> tuple[float, float]:
+        """The baseline geometry for a traffic-class *distribution*.
+
+        Weighted by ML-1's distribution rather than taking its argmax, so a
+        genuinely uncertain classification contributes a blurred baseline
+        instead of a confidently wrong one.
+
+        A class with no fitted baseline contributes nothing and its
+        probability mass is renormalised away, rather than contributing a zero
+        that would drag the baseline toward the origin and manufacture a large
+        spurious offset.
+        """
+        known = {
+            label: p
+            for label, p in probabilities.items()
+            if self.key(label, ip_version) in self.min_len
+        }
+        total = sum(known.values())
+        if not total:
+            return 0.0, 0.0
+        min_len = sum(self.min_len[self.key(k, ip_version)] * p for k, p in known.items()) / total
+        modal = sum(self.modal_len[self.key(k, ip_version)] * p for k, p in known.items()) / total
+        return min_len, modal
+
+    @classmethod
+    def fit(cls, samples: Sequence[tuple[str, int, int, int]]) -> ModeBaseline:
+        """Fit from ``(traffic_class, ip_version, min_len, modal_len)`` rows.
+
+        The caller passes *transport-mode training sessions only*; this cannot
+        check that for itself, and a tunnel session leaking in would move the
+        baseline toward the very offset it is supposed to measure against.
+
+        Median rather than mean: one session whose generator stalled and
+        produced a handful of keepalives would drag a mean and cannot move a
+        median.
+        """
+        by_key_min: dict[str, list[int]] = {}
+        by_key_modal: dict[str, list[int]] = {}
+        for traffic_class, ip_version, min_len, modal_len in samples:
+            key = cls.key(traffic_class, ip_version)
+            by_key_min.setdefault(key, []).append(min_len)
+            by_key_modal.setdefault(key, []).append(modal_len)
+        return cls(
+            min_len={k: float(median(v)) for k, v in sorted(by_key_min.items())},
+            modal_len={k: float(median(v)) for k, v in sorted(by_key_modal.items())},
+        )
+
+    def to_dict(self) -> dict[str, dict[str, float]]:
+        return {"min_len": self.min_len, "modal_len": self.modal_len}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ModeBaseline:
+        data = data or {}
+        return cls(
+            min_len=dict(data.get("min_len") or {}), modal_len=dict(data.get("modal_len") or {})
+        )
+
+    def __bool__(self) -> bool:
+        return bool(self.min_len)
+
+
+EMPTY_BASELINE: Final = ModeBaseline(min_len={}, modal_len={})
+"""What a model trained before baselines existed, or loaded without its meta
+file, carries. Both offsets then come out 0.0 for every session, which is
+uninformative rather than wrong -- the tree simply cannot split on them."""
+
+
+def _inner_header_bytes(ip_version: int) -> float:
+    return float(IPV6_HEADER_BYTES if ip_version == 6 else IPV4_HEADER_BYTES)
 
 
 def extract_mode_features(
     pair: SAPair,
     all_packets: Sequence[PacketRecord],
     traffic_class_probabilities: dict[str, float],
+    baseline: ModeBaseline = EMPTY_BASELINE,
 ) -> ModeFeatures:
     """LLD section 7.3's features for one SA.
 
@@ -124,6 +263,9 @@ def extract_mode_features(
     packets = pair.forward.packets + (pair.reverse.packets if pair.reverse else ())
     lengths = [p.esp_payload_len for p in packets if p.esp_payload_len is not None]
     max_len = max(lengths) if lengths else 0
+    min_len = min(lengths) if lengths else 0
+
+    ip_version = packets[0].ip_version if packets else 4
 
     endpoints = {p.src for p in packets} | {p.dst for p in packets}
     spi_pairs = {(p.src, p.spi) for p in all_packets if p.spi is not None}
@@ -132,23 +274,31 @@ def extract_mode_features(
     cleartext = sum(1 for p in all_packets if p.proto in CLEARTEXT_PROTOS)
     cleartext_ratio = cleartext / len(all_packets) if all_packets else 0.0
 
-    # Feature 4: the offset of the observed modal length from what this traffic
-    # class looks like without an inner header. Weighted by ML-1's distribution
-    # rather than taking its argmax, so a genuinely uncertain classification
-    # contributes a blurred baseline instead of a confidently wrong one.
+    expected_min, expected_modal = baseline.expected(traffic_class_probabilities, ip_version)
     modal = _modal(lengths)
-    baseline = sum(
-        EXPECTED_MODAL_LEN.get(label, 0) * probability
-        for label, probability in traffic_class_probabilities.items()
-    )
-    offset = float(modal - baseline) if baseline else 0.0
 
     return ModeFeatures(
         max_len_over_mtu=float(max_len) / PATH_MTU,
         spi_pairs_per_endpoint=float(per_endpoint),
         cleartext_ratio=float(cleartext_ratio),
-        modal_len_offset=offset,
+        modal_len_offset=float(modal - expected_modal) if expected_modal else 0.0,
+        min_len_offset=float(min_len - expected_min) if expected_min else 0.0,
+        inner_header_bytes=_inner_header_bytes(ip_version),
     )
+
+
+def session_geometry(pair: SAPair) -> tuple[int, int, int]:
+    """``(ip_version, min_len, modal_len)`` for one SA, for fitting a baseline.
+
+    Shares ``_modal`` with the feature extractor deliberately: a baseline
+    fitted with a different definition of "modal" than the feature it is
+    subtracted from would be a constant offset applied to every session, which
+    is invisible on the training fold and wrong everywhere else.
+    """
+    packets = pair.forward.packets + (pair.reverse.packets if pair.reverse else ())
+    lengths = [p.esp_payload_len for p in packets if p.esp_payload_len is not None]
+    ip_version = packets[0].ip_version if packets else 4
+    return ip_version, (min(lengths) if lengths else 0), _modal(lengths)
 
 
 def _modal(lengths: Sequence[int]) -> int:
@@ -171,10 +321,18 @@ def _modal(lengths: Sequence[int]) -> int:
 
 @dataclass
 class ModeModel:
-    """A trained mode classifier and the label order it was trained with."""
+    """A trained mode classifier, its label order, and its fitted baseline.
+
+    The baseline travels *with* the booster rather than beside it because two
+    of the six features are expressed relative to it. A model loaded without
+    its baseline would compute both offsets as 0.0, split on neither, and
+    quietly fall back to the accuracy of the four features that were already
+    there -- with nothing raised and no way to tell from the output.
+    """
 
     booster: Any
     labels: tuple[str, ...] = MODE_LABELS
+    baseline: ModeBaseline = EMPTY_BASELINE
 
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         raw = np.asarray(self.booster.predict(features), dtype=np.float64)
@@ -194,7 +352,12 @@ class ModeModel:
         self.booster.save_model(str(path))
         path.with_suffix(".meta.json").write_text(
             json.dumps(
-                {"labels": list(self.labels), "feature_names": ModeFeatures.names()}, indent=2
+                {
+                    "labels": list(self.labels),
+                    "feature_names": ModeFeatures.names(),
+                    "baseline": self.baseline.to_dict(),
+                },
+                indent=2,
             ),
             encoding="utf-8",
         )
@@ -204,7 +367,11 @@ class ModeModel:
         import lightgbm as lgb
 
         meta = json.loads(path.with_suffix(".meta.json").read_text(encoding="utf-8"))
-        return cls(booster=lgb.Booster(model_file=str(path)), labels=tuple(meta["labels"]))
+        return cls(
+            booster=lgb.Booster(model_file=str(path)),
+            labels=tuple(meta["labels"]),
+            baseline=ModeBaseline.from_dict(meta.get("baseline")),
+        )
 
 
 def train_mode(
@@ -212,8 +379,15 @@ def train_mode(
     y: np.ndarray,
     *,
     num_boost_round: int = 200,
+    baseline: ModeBaseline = EMPTY_BASELINE,
 ) -> ModeModel:
-    """Train ML-2 over LLD section 7.3's four features."""
+    """Train ML-2 over LLD section 7.3's features and the two additions.
+
+    *baseline* is stored on the returned model, not used here: the features
+    have already been computed against it by the caller. It is threaded
+    through so that a trained model cannot be saved without the baseline its
+    offsets were measured from.
+    """
     import lightgbm as lgb
 
     params = {
@@ -229,7 +403,7 @@ def train_mode(
     }
     dataset = lgb.Dataset(features, label=y, feature_name=ModeFeatures.names())
     booster = lgb.train(params, dataset, num_boost_round=num_boost_round)
-    return ModeModel(booster=booster)
+    return ModeModel(booster=booster, baseline=baseline)
 
 
 def evaluate_mode(model: ModeModel, features: np.ndarray, y: np.ndarray) -> Evaluation:

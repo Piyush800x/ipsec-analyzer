@@ -46,29 +46,29 @@
     {
       "bin_lower": 0.6000000000000001,
       "bin_upper": 0.7000000000000001,
-      "count": 2,
-      "mean_confidence": 0.6522700809001128,
-      "accuracy": 0.5
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
     },
     {
       "bin_lower": 0.7000000000000001,
       "bin_upper": 0.8,
-      "count": 2,
-      "mean_confidence": 0.7870340197737586,
+      "count": 1,
+      "mean_confidence": 0.7939062547124708,
       "accuracy": 1.0
     },
     {
       "bin_lower": 0.8,
       "bin_upper": 0.9,
-      "count": 1,
-      "mean_confidence": 0.8692075953190561,
+      "count": 2,
+      "mean_confidence": 0.8571817259832565,
       "accuracy": 1.0
     },
     {
       "bin_lower": 0.9,
       "bin_upper": 1.0,
-      "count": 792,
-      "mean_confidence": 0.9989871238406779,
+      "count": 931,
+      "mean_confidence": 0.9981585538043165,
       "accuracy": 1.0
     }
   ]

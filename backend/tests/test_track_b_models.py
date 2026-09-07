@@ -22,6 +22,7 @@ from analyzer.ingest.reader import FlowKey, PacketRecord
 from analyzer.track_b.attribution import TOP_FEATURES, lightgbm_attribution
 from analyzer.track_b.mode import (
     MODE_LABELS,
+    ModeBaseline,
     ModeFeatures,
     evaluate_mode,
     extract_mode_features,
@@ -189,6 +190,25 @@ def _pair(*, lengths: list[int], src: str = "10.0.0.1", dst: str = "10.0.0.2") -
     )
 
 
+BASELINE = ModeBaseline.fit(
+    [
+        # (traffic_class, ip_version, min_len, modal_len) -- a stand-in for the
+        # per-class geometry `train.py` fits from transport training sessions.
+        ("voip", 4, 100, 200),
+        ("video", 4, 120, 1240),
+        ("web", 4, 76, 1472),
+        ("icmp", 4, 100, 110),
+    ]
+)
+"""A fitted baseline for the feature tests.
+
+Small and explicit rather than loaded from the real model: these tests are
+about how an offset is *computed*, and a baseline that changed whenever a
+model was retrained would make them fail for reasons that have nothing to do
+with the code under test.
+"""
+
+
 class TestModeFeatures:
     def test_tunnel_mode_shows_a_larger_max_length(self) -> None:
         """LLD section 7.3, feature 1: the inner IP header is 20 bytes of
@@ -211,8 +231,8 @@ class TestModeFeatures:
         pair = _pair(lengths=[200] * 40)
         packets = list(pair.forward.packets)
 
-        as_voip = extract_mode_features(pair, packets, {"voip": 1.0})
-        as_video = extract_mode_features(pair, packets, {"video": 1.0})
+        as_voip = extract_mode_features(pair, packets, {"voip": 1.0}, BASELINE)
+        as_video = extract_mode_features(pair, packets, {"video": 1.0}, BASELINE)
 
         assert as_voip.modal_len_offset != as_video.modal_len_offset
 
@@ -221,10 +241,60 @@ class TestModeFeatures:
         pair = _pair(lengths=[200] * 40)
         packets = list(pair.forward.packets)
 
-        blurred = extract_mode_features(pair, packets, {"voip": 0.5, "video": 0.5})
-        confident = extract_mode_features(pair, packets, {"voip": 1.0})
+        blurred = extract_mode_features(pair, packets, {"voip": 0.5, "video": 0.5}, BASELINE)
+        confident = extract_mode_features(pair, packets, {"voip": 1.0}, BASELINE)
 
         assert blurred.modal_len_offset != confident.modal_len_offset
+
+    def test_the_minimum_length_carries_the_header_the_maximum_hides(self) -> None:
+        """Why `min_len_offset` exists (see the module docstring).
+
+        Both flows saturate the 1472-byte path MTU, as bulk traffic does, and
+        the tunnel-mode one also carries a 20-byte inner header on its small
+        packets. The maximum length is identical -- the header displaced
+        payload rather than adding to it -- so feature 1 sees nothing, and the
+        minimum sees the whole 20 bytes.
+        """
+        transport = _pair(lengths=[1472] * 30 + [76] * 10)
+        tunnel = _pair(lengths=[1472] * 30 + [96] * 10)
+        baseline = ModeBaseline.fit([("web", 4, 76, 1472)])
+
+        t_features = extract_mode_features(
+            transport, list(transport.forward.packets), {"web": 1.0}, baseline
+        )
+        u_features = extract_mode_features(
+            tunnel, list(tunnel.forward.packets), {"web": 1.0}, baseline
+        )
+
+        assert u_features.max_len_over_mtu == t_features.max_len_over_mtu
+        assert t_features.min_len_offset == 0.0
+        assert u_features.min_len_offset == 20.0
+
+    def test_an_unfitted_class_does_not_drag_the_baseline_to_zero(self) -> None:
+        """A class with no baseline is renormalised away, not counted as 0.
+
+        Counting it as zero would pull the weighted baseline toward the origin
+        and manufacture an enormous offset out of an unknown class -- a large
+        confident feature value derived from an absence of information.
+        """
+        pair = _pair(lengths=[200] * 40)
+        packets = list(pair.forward.packets)
+
+        known_only = extract_mode_features(pair, packets, {"voip": 1.0}, BASELINE)
+        half_unknown = extract_mode_features(
+            pair, packets, {"voip": 0.5, "not_a_class": 0.5}, BASELINE
+        )
+
+        assert half_unknown.min_len_offset == known_only.min_len_offset
+
+    def test_an_empty_baseline_yields_zero_offsets_rather_than_nonsense(self) -> None:
+        """What a model saved before baselines existed produces. Uninformative
+        is the right failure here; a large fabricated offset is not."""
+        pair = _pair(lengths=[200] * 40)
+        features = extract_mode_features(pair, list(pair.forward.packets), {"voip": 1.0})
+
+        assert features.min_len_offset == 0.0
+        assert features.modal_len_offset == 0.0
 
     def test_features_have_no_nans_on_a_single_packet_flow(self) -> None:
         pair = _pair(lengths=[100])
@@ -247,8 +317,8 @@ class TestModeFeatures:
 class TestModeClassifier:
     def _dataset(self, n: int = 80, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
         rng = np.random.default_rng(seed)
-        transport = rng.normal([0.90, 1.2, 0.15, -5.0], 0.03, size=(n, 4))
-        tunnel = rng.normal([0.95, 6.0, 0.01, 20.0], 0.03, size=(n, 4))
+        transport = rng.normal([0.90, 1.2, 0.15, -5.0, 0.0, 20.0], 0.03, size=(n, 6))
+        tunnel = rng.normal([0.95, 6.0, 0.01, 20.0, 20.0, 20.0], 0.03, size=(n, 6))
         x = np.vstack([transport, tunnel]).astype(np.float32)
         y = np.array([0] * n + [1] * n, dtype=np.int64)
         return x, y
@@ -278,6 +348,8 @@ class TestModeClassifier:
                 spi_pairs_per_endpoint=6.0,
                 cleartext_ratio=0.01,
                 modal_len_offset=20.0,
+                min_len_offset=20.0,
+                inner_header_bytes=20.0,
             )
         )
 
@@ -292,6 +364,8 @@ class TestModeClassifier:
             spi_pairs_per_endpoint=2.0,
             cleartext_ratio=3.0,
             modal_len_offset=4.0,
+            min_len_offset=5.0,
+            inner_header_bytes=6.0,
         )
 
         assert dict(zip(ModeFeatures.names(), features.vector(), strict=True)) == {
@@ -299,6 +373,8 @@ class TestModeClassifier:
             "spi_pairs_per_endpoint": 2.0,
             "cleartext_ratio": 3.0,
             "modal_len_offset": 4.0,
+            "min_len_offset": 5.0,
+            "inner_header_bytes": 6.0,
         }
 
 

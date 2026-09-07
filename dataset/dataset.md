@@ -168,31 +168,55 @@ rather than random:
 | email | 32 | ~14-19 |
 | file_transfer | 48 | ~18 |
 | icmp | 28 | ~18-19 |
-| **messaging** | 32 | **0 — see below** |
+| messaging | 32 | ~17 — see below |
 | video | 32 | ~18 |
 | voip | 36 | ~18 |
 | web | 40 | ~19 |
 
-### `messaging` contributes no training rows
+### `messaging` was a zero-row class, and what fixed it
 
-At roughly one packet per second, a 10-second window holds seven to ten
-packets. LLD §7.6 scores a window only above twenty, so **every messaging
-window is discarded** and the class reaches neither training nor test. The
-sessions are on disk and are real; they are simply unscoreable under the
-windowing the LLD specifies, and a longer session does not help because this is
-a rate and not a duration.
+The first version of this dataset produced **no usable messaging data at all**,
+and nothing failed to say so. At roughly one packet per second a 10-second
+window held seven to ten packets; LLD §7.6 scores a window only at twenty or
+above, so every messaging window was discarded, the class reached neither
+training nor test, and the traffic classifier was silently a six-class model.
+A longer session does not help — that is a rate, not a duration.
 
-The consequence is that the traffic classifier is a six-class model. It is
-reported as one — `models/metrics.json` carries a `classes_absent` block and
-the model card opens by saying so — because a macro-F1 averaged over six
-classes is not comparable to a seven-class target: six handled perfectly
-averages 0.857, which clears PRD §8.4's 0.85 threshold with a seventh of the
-problem never attempted.
+**It was not fixed by making messaging faster.** Raising the packet rate until
+the windows cleared the floor would be meeting a target by changing the data,
+which is the one thing this dataset must not do.
 
-This was **not** resolved by raising the messaging packet rate until the
-windows cleared the floor. That would meet a target by changing the data. See
-CHANGELOG.md for the two defensible resolutions, both of which are decisions
-about the specification rather than the code.
+It was fixed by making the generator *more faithful*. The original sent
+messages and replies and nothing else. A real XMPP or Signal connection also
+carries, all of it genuine messaging traffic:
+
+* chat states (XEP-0085) — the "typing…" indicator, before and after each
+  message;
+* delivery receipts (XEP-0184) and read markers (XEP-0333) — the two ticks and
+  the blue tick, one of each *per message*;
+* message bursts — people send "hey", then "you there", then the question;
+* keepalive pings, because the connection is long-lived and NAT bindings are
+  not;
+* roster presence, because the connection is client-to-server and carries every
+  contact's state changes, not just the open conversation.
+
+The idle gap between conversational turns is **unchanged** at 1–12 seconds, so
+the silences that define the class are still there; the enrichment clusters
+small packets around each turn rather than filling the gaps between them.
+
+Measured on the same configuration before and after:
+
+```
+before:   61 packets ->  0 windows
+after:   678 packets -> 17 windows, 28-116 packets each
+```
+
+`tests/test_messaging_peer.py` holds both ends of this. It asserts every window
+clears the floor, *and* that the rate does not run away — the first draft of the
+enrichment replied per message rather than per turn, so a three-message burst
+drew three replies each opening a turn of three more, and it went from 28
+packets in the first window to 1565 in the ninth while still looking like
+perfectly ordinary chat traffic.
 
 ### The failure this dataset nearly shipped with
 

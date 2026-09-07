@@ -1,0 +1,16 @@
+{
+  "duration_s": 120,
+  "generated_at": "2026-09-07T08:04:09.183083+00:00",
+  "purpose": "PRD section 16 demo captures, implementation-plan step 11.5. Held outside dataset/sessions/ so that no training, calibration or test fold can contain them.",
+  "seed": 20261105,
+  "tunnels": {
+    "demo-tunnel-a": {
+      "derived_from_matrix_fixture": "weak-reference",
+      "packet_count": 13117
+    },
+    "demo-tunnel-b": {
+      "derived_from_matrix_fixture": "hardened-reference",
+      "packet_count": 13248
+    }
+  }
+}

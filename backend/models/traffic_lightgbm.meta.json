@@ -79,6 +79,7 @@
     "email",
     "file_transfer",
     "icmp",
+    "messaging",
     "video",
     "voip",
     "web"

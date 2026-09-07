@@ -122,12 +122,25 @@ class JobRunner:
         *,
         max_concurrent: int,
         engine_version: str,
+        model_dir: Path | None = None,
         use_process_pool: bool = True,
     ) -> None:
         self._session_factory = session_factory
         self._engine = engine
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._engine_version = engine_version
+        self._model_dir = model_dir
+        """Where `InferenceService` looks for trained artefacts.
+
+        Threaded all the way from `Settings.model_dir` to the pipeline call
+        because the pipeline defaults it to ``None``, and ``None`` means *no
+        models* -- which the inference service reports as UNAVAILABLE with a
+        reason rather than raising. So a runner that forgets to pass this
+        produces a complete, plausible, model-free assessment on a deployment
+        that has models sitting on disk, and nothing anywhere says so. That is
+        what shipped: `MODEL_DIR` was read into `Settings`, wired into
+        docker-compose.offline.yml, and never reached this call.
+        """
         self._pool: ProcessPoolExecutor | None = ProcessPoolExecutor() if use_process_pool else None
         self.bus = EventBus()
         self._tasks: set[asyncio.Task[None]] = set()
@@ -223,6 +236,7 @@ class JobRunner:
                     self._engine,
                     capture_id=capture_id,
                     engine_version=self._engine_version,
+                    model_dir=self._model_dir,
                     on_progress=emit,
                 ),
             )
@@ -238,6 +252,7 @@ class JobRunner:
                 self._engine,
                 capture_id=capture_id,
                 engine_version=self._engine_version,
+                model_dir=self._model_dir,
             ),
         )
         document = AssessmentDocument.model_validate_json(payload)

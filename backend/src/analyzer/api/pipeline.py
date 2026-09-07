@@ -193,6 +193,13 @@ def analyse_capture(
         capture_id=capture_id,  # type: ignore[arg-type] # a UUIDv7 from the caller's row
         generated_at=generated_at or datetime.now(tz=UTC),
         engine_version=engine_version,
+        # What actually ran, hashed from the artefacts on disk. Omitting this
+        # does not leave the field merely unset: an empty `model_versions` is a
+        # positive claim that no model ran, and the technical report renders it
+        # as "Models: none loaded" plus a section saying the inference stage was
+        # unavailable. On an assessment whose classifier had just reported VoIP
+        # at confidence 1.0, that is one document contradicting itself.
+        model_versions=service.model_versions,
     )
     progress(
         RunStage.ASSESS,

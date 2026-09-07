@@ -17,24 +17,15 @@ feature; LLD §7.3 breaks the circularity in that direction and only that one.
 
 ## Data
 
-- Sessions: 216
-- Windows: 2546 train / 584 calibration / 797 test
-- Configurations: 35 train / 8 calibration / 11 test
+- Sessions: 248
+- Windows: 2888 train / 652 calibration / 934 test
+- Configurations: 40 train / 9 calibration / 13 test
 - Tabular features: 74
 
 Split **by configuration**, never by window. Windows overlap by 50%, so a
 window-level split would put two halves of the same measurement on either side
 of the train/test boundary and report a memory test as an accuracy. A
 configuration's repeat runs are held together for the same reason one level up.
-
-> **This is a 6-class model, not a 7-class one.**
->
-> Every macro-F1 below is averaged over 6 classes. One class produced
-> no scorable window and was never trained on or tested against:
->
-> - **`messaging`** — sessions were generated but every window fell below LLD section 7.6's 20-packet floor, so the class contributes no training rows. See CHANGELOG.md, 'LLD section 7.6's window floor makes PRD section 9.2's sparsest class unlearnable'
->
-> A 6-class model that was perfect would average 6/7 = 0.857 against a 7-class expectation. Compare these numbers to the target with that in mind.
 
 ## ML-1 — LightGBM baseline (step 9.6)
 
@@ -45,34 +36,36 @@ Held-out macro-F1: **1.0000**, accuracy 1.0000
 | email | 1.0000 | 140 |
 | file_transfer | 1.0000 | 144 |
 | icmp | 1.0000 | 73 |
+| messaging | 1.0000 | 137 |
 | video | 1.0000 | 144 |
 | voip | 1.0000 | 144 |
 | web | 1.0000 | 152 |
 
-ECE 0.0000 uncalibrated, 0.0000 after isotonic regression.
+ECE 0.0001 uncalibrated, 0.0001 after isotonic regression.
 
 ## ML-1 — 1D-CNN (step 9.7)
 
-Held-out macro-F1: **0.9988**, accuracy 0.9987
+Held-out macro-F1: **1.0000**, accuracy 1.0000
 
 | Class | F1 | Support (windows) |
 |---|---|---|
-| email | 0.9964 | 140 |
-| file_transfer | 0.9965 | 144 |
+| email | 1.0000 | 140 |
+| file_transfer | 1.0000 | 144 |
 | icmp | 1.0000 | 73 |
+| messaging | 1.0000 | 137 |
 | video | 1.0000 | 144 |
 | voip | 1.0000 | 144 |
 | web | 1.0000 | 152 |
 
-PRD §8.4 macro-F1 target: met (0.9988 >= 0.85 is the target)
+PRD §8.4 macro-F1 target: met (1.0000 >= 0.85 is the target)
 
 ## Calibration (step 9.8)
 
 - CNN temperature: 1.0000
-- CNN ECE: 0.0021 → 0.0021
-- LightGBM ECE: 0.0000 → 0.0000
+- CNN ECE: 0.0024 → 0.0024
+- LightGBM ECE: 0.0001 → 0.0001
 
-PRD §8.4 ECE target: met (0.0021 <= 0.1 is the target)
+PRD §8.4 ECE target: met (0.0024 <= 0.1 is the target)
 
 ### Reliability diagram — CNN, temperature-scaled, test fold
 
@@ -83,22 +76,25 @@ what it knows.
 
 | Confidence bin | Windows | Mean confidence | Accuracy | Accuracy |
 |---|---|---|---|---|
-| 0.6-0.7 | 2 | 0.652 | 0.500 | `############............` |
-| 0.7-0.8 | 2 | 0.787 | 1.000 | `########################` |
-| 0.8-0.9 | 1 | 0.869 | 1.000 | `########################` |
-| 0.9-1.0 | 792 | 0.999 | 1.000 | `########################` |
+| 0.7-0.8 | 1 | 0.794 | 1.000 | `########################` |
+| 0.8-0.9 | 2 | 0.857 | 1.000 | `########################` |
+| 0.9-1.0 | 931 | 0.998 | 1.000 | `########################` |
 
 ## ML-2 — operating mode (step 9.9)
 
-Held-out accuracy: **0.7273** over 44 held-out sessions (216 total).
+Held-out accuracy: **1.0000** over 52 held-out sessions (248 total).
 
-Step 9.9 target: **NOT MET** (0.7273 >= 0.9 is the target)
+Step 9.9 target: met (1.0000 >= 0.9 is the target)
 
-Features, in LLD §7.3's order of usefulness: `max_len_over_mtu`, `spi_pairs_per_endpoint`, `cleartext_ratio`, `modal_len_offset`
+Features, in LLD §7.3's order of usefulness: `max_len_over_mtu`, `spi_pairs_per_endpoint`, `cleartext_ratio`, `modal_len_offset`, `min_len_offset`, `inner_header_bytes`
 
 Scored per *session*, not per window: operating mode is a property of the SA,
 and scoring per window would count one tunnel's thirty windows as thirty
 independent correct answers.
+
+The last two features are measured against a baseline fitted from the training fold's *transport* sessions — 13 (traffic class, IP version) cells of median ESP geometry, stored in `mode_lightgbm.meta.json` and loaded with the model. See `track_b/mode.py` for why the hand-written table it replaced could not work: its error reached 672 bytes on an effect that is 20.
+
+**Why this score is what it is.** `min_len_offset` is close to a direct measurement of the thing being classified — tunnel mode adds a 20- or 40-byte inner header to every packet, and the smallest packets in a flow are the ones far enough below the path MTU to show it rather than absorb it. On this testbed, where every session is one clean SA pair between two containers with a fixed MTU, that separates completely. Real traffic will not be as clean: several SAs, varying path MTUs, fragmentation, and a baseline fitted to generators that are not these. Read this the same way as ML-1's figure, below.
 
 ## External validation (step 9.12)
 
@@ -130,9 +126,13 @@ separates most of them.
 
 So the score measures **how distinct this testbed's generators are**, not how
 well the model would classify real traffic. The only measurement that would
-answer the second question is the external validation below, and it has not
+answer the second question is the external validation above, and it has not
 been run. Treat these figures as a lower bound on the difficulty of the task
 as posed, not as evidence of generalisation.
+
+**The same reading applies to ML-2**, for a different reason: its strongest
+feature is close to a direct measurement of the inner header rather than a
+learned proxy for it. See that section above.
 
 ## Limitations
 
@@ -141,11 +141,17 @@ as posed, not as evidence of generalisation.
   differ, and the external validation above is what would measure by how much.
 - **The label is the generator, not the application.** A `video` window is one
   where this testbed ran ffmpeg, not one where a person watched something.
-- **Seven classes, closed set.** There is no "other". Traffic unlike anything in
-  the matrix will be forced into the nearest class, with a confidence that
-  reflects the model's certainty among those seven and not its certainty that
-  the answer is among them at all.
-- **ML-2 depends on ML-1.** A wrong traffic class feeds a wrong baseline into the
-  mode classifier's fourth feature. The dependency is deliberate and documented
-  (LLD §7.3), but it means ML-2's errors are correlated with ML-1's.
+- **7 classes, closed set.** There is no "other". Traffic unlike
+  anything in the matrix will be forced into the nearest class, with a
+  confidence that reflects the model's certainty among those 7 and
+  not its certainty that the answer is among them at all.
+- **ML-2 depends on ML-1.** A wrong traffic class feeds a wrong baseline into
+  the mode classifier's length-offset features. The dependency is deliberate
+  and documented (LLD §7.3), but it means ML-2's errors are correlated with
+  ML-1's.
+- **ML-2's baseline is fitted to this testbed.** The per-class geometry the
+  mode classifier measures its offsets against is the median of this
+  corpus's transport sessions, so it inherits every way in which these
+  generators differ from real traffic. Step 9.12 is the measurement that
+  would say by how much.
 

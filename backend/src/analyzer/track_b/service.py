@@ -348,7 +348,16 @@ class InferenceService:
             label = str(prediction.label.value)
             distribution[label] = max(distribution.get(label, 0.0), prediction.probability)
 
-        features = extract_mode_features(pair, packets, distribution)
+        # The model's own fitted baseline, not a default: two of the six
+        # features are offsets measured against it, and computing them against
+        # an empty baseline would silently zero both and leave the prediction
+        # resting on the four features that were never sufficient.
+        features = extract_mode_features(
+            pair,
+            packets,
+            distribution,
+            self._mode.baseline,  # type: ignore[attr-defined] # loaded ModeModel
+        )
         label, confidence = self._mode.predict(features)  # type: ignore[attr-defined] # loaded ModeModel
         try:
             mode = OperatingMode(label)

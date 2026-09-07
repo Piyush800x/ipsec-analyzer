@@ -74,6 +74,7 @@ def create_app(
             assessment_engine,
             max_concurrent=resolved.max_concurrent_analyses,
             engine_version=__version__,
+            model_dir=resolved.model_dir,
             use_process_pool=use_process_pool,
         )
         reachable = await check_connection(engine)

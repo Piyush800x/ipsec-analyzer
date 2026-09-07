@@ -46,6 +46,18 @@ dataset/**/*.pcapng
 # even though the captures beside them are ignored. Step 8.4 puts the whole
 # tree under DVC.
 dataset/sessions/
+
+# dataset/demo/ is the exception, and it is committed on purpose.
+#
+# Step 11.5's Done-when is that the two PRD 16 demo captures are *committed*
+# and that neither appears in any training split. Both halves need this rule:
+# committed, so a clone can run the demo without a testbed and without DVC; and
+# outside dataset/sessions/, so `load_dataset` cannot walk them into a fold.
+# 6.6 MB for the two, which is the price of a demo that works from a fresh
+# clone. See backend/testbed/demo_captures.py.
+!dataset/demo/
+!dataset/demo/**
+
 backend/models/*.pkl
 backend/models/*.joblib
 backend/models/*.onnx
@@ -86,3 +98,10 @@ desktop.ini
 
 # npm on Windows occasionally materialises its cache under the reserved name NUL
 NUL/
+
+# The retraining and regeneration logs of the second Phase 8/9 run. `gen*.log`
+# above already covers the originals; these follow the same rule — the logs are
+# provenance for a run, not for the repository.
+dataset/train2.log
+dataset/demo-gen.log
+dataset/regen-msg-*.log

@@ -117,6 +117,11 @@ def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> s
     mode = metrics.get("mode", {})
     windows = metrics.get("windows", {})
     configurations = metrics.get("configurations", {})
+    trained = len(metrics.get("labels", []))
+    """How many classes the model actually has. Read from the artefact rather
+    than from PRD §9.2's seven, because the Limitations section below describes
+    what the model cannot do and a hardcoded count there would be a wrong
+    answer in the one place a reader goes to find the limits."""
 
     lines: list[str] = [
         "# Model card — Track B",
@@ -218,6 +223,23 @@ def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> s
             "Scored per *session*, not per window: operating mode is a property of the SA,",
             "and scoring per window would count one tunnel's thirty windows as thirty",
             "independent correct answers.",
+            "",
+            f"The last two features are measured against a baseline fitted from the "
+            f"training fold's *transport* sessions — {mode.get('baseline_cells', 0)} "
+            f"(traffic class, IP version) cells of median ESP geometry, stored in "
+            f"`mode_lightgbm.meta.json` and loaded with the model. See "
+            "`track_b/mode.py` for why the hand-written table it replaced could not "
+            "work: its error reached 672 bytes on an effect that is 20.",
+            "",
+            "**Why this score is what it is.** `min_len_offset` is close to a direct "
+            "measurement of the thing being classified — tunnel mode adds a 20- or "
+            "40-byte inner header to every packet, and the smallest packets in a flow "
+            "are the ones far enough below the path MTU to show it rather than absorb "
+            "it. On this testbed, where every session is one clean SA pair between two "
+            "containers with a fixed MTU, that separates completely. Real traffic will "
+            "not be as clean: several SAs, varying path MTUs, fragmentation, and a "
+            "baseline fitted to generators that are not these. Read this the same way "
+            "as ML-1's figure, below.",
         ]
     else:
         lines += [f"**Not trained.** {mode.get('reason', 'no reason recorded')}"]
@@ -264,9 +286,13 @@ def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> s
         "",
         "So the score measures **how distinct this testbed's generators are**, not how",
         "well the model would classify real traffic. The only measurement that would",
-        "answer the second question is the external validation below, and it has not",
+        "answer the second question is the external validation above, and it has not",
         "been run. Treat these figures as a lower bound on the difficulty of the task",
         "as posed, not as evidence of generalisation.",
+        "",
+        "**The same reading applies to ML-2**, for a different reason: its strongest",
+        "feature is close to a direct measurement of the inner header rather than a",
+        "learned proxy for it. See that section above.",
         "",
         "## Limitations",
         "",
@@ -275,13 +301,22 @@ def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> s
         "  differ, and the external validation above is what would measure by how much.",
         "- **The label is the generator, not the application.** A `video` window is one",
         "  where this testbed ran ffmpeg, not one where a person watched something.",
-        '- **Seven classes, closed set.** There is no "other". Traffic unlike anything in',
-        "  the matrix will be forced into the nearest class, with a confidence that",
-        "  reflects the model's certainty among those seven and not its certainty that",
-        "  the answer is among them at all.",
-        "- **ML-2 depends on ML-1.** A wrong traffic class feeds a wrong baseline into the",
-        "  mode classifier's fourth feature. The dependency is deliberate and documented",
-        "  (LLD §7.3), but it means ML-2's errors are correlated with ML-1's.",
+        # Written from the trained label count, not from PRD §9.2's seven. A
+        # card that says "seven classes" on a six-class model is wrong in the
+        # one section a reader consults to find out what the model cannot do.
+        f'- **{trained} classes, closed set.** There is no "other". Traffic unlike',
+        "  anything in the matrix will be forced into the nearest class, with a",
+        f"  confidence that reflects the model's certainty among those {trained} and",
+        "  not its certainty that the answer is among them at all.",
+        "- **ML-2 depends on ML-1.** A wrong traffic class feeds a wrong baseline into",
+        "  the mode classifier's length-offset features. The dependency is deliberate",
+        "  and documented (LLD §7.3), but it means ML-2's errors are correlated with",
+        "  ML-1's.",
+        "- **ML-2's baseline is fitted to this testbed.** The per-class geometry the",
+        "  mode classifier measures its offsets against is the median of this",
+        "  corpus's transport sessions, so it inherits every way in which these",
+        "  generators differ from real traffic. Step 9.12 is the measurement that",
+        "  would say by how much.",
         "",
     ]
     return "\n".join(lines) + "\n"

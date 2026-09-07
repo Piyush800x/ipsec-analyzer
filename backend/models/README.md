@@ -1,6 +1,6 @@
 # Trained model artefacts
 
-**Committed to git, not DVC.** All 3.3 MB of what inference loads is in the
+**Committed to git, not DVC.** All 3.7 MB of what inference loads is in the
 repository, so a clone works immediately: `uv sync && uv run uvicorn ...` gives
 you a running analyser with Track B's classifiers live, no training and no
 14 GB dataset required.
@@ -29,6 +29,7 @@ with the thing it names.
 | `traffic_lightgbm.meta.json` | its feature order and label order — both part of the artefact's contract |
 | `traffic_cnn.pt` | ML-1, the 1D-CNN of LLD §7.6 (step 9.7) |
 | `mode_lightgbm.txt` | ML-2, tunnel vs transport (step 9.9) |
+| `mode_lightgbm.meta.json` | its label order **and its fitted baseline** — the median transport-mode ESP geometry per (traffic class, IP version) that two of ML-2's six features are measured against. Not optional: a booster loaded without it computes both offsets as 0.0, splits on neither, and silently falls back to the four features that were never sufficient |
 | `calibration.json` | the CNN's temperature and the LightGBM isotonic knots (step 9.8) |
 | `reliability_cnn.json` | the reliability diagram's data |
 | `metrics.json` | everything the training run measured, on the held-out fold |
