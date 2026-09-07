@@ -23,6 +23,12 @@ dependencies = [
     "numpy>=2.4.6",
     "weasyprint>=69.0",
     "jinja2>=3.1.6",
+    # Runtime, not training-only: inference loads the LightGBM traffic and mode
+    # classifiers, so without this a plain `uv sync` gives a checkout whose
+    # models silently fail to load and every Track B field falls back to
+    # UNAVAILABLE. Found by cloning the repo clean and watching it happen.
+    # A few megabytes; torch and scikit-learn stay in the `ml` group below.
+    "lightgbm>=4.5",
 ]
 
 [dependency-groups]
@@ -43,11 +49,16 @@ testbed = [
 # artefacts through analyzer.track_b.service, which needs neither LightGBM nor
 # torch to read one, and putting a 200 MB tensor library in the offline image
 # (step 11.4) to run inference it does not do would be a poor trade.
+# Training only. Deliberately not runtime dependencies: torch is ~200 MB and
+# the offline image (step 11.4) has no use for it, because inference loads the
+# LightGBM classifier rather than the CNN. scikit-learn fits the isotonic
+# calibration, which inference then applies through `np.interp` on the exported
+# knots rather than by loading an estimator.
+#
 # SHAP values come from LightGBM's own `pred_contrib=True` (exact TreeSHAP)
 # rather than the `shap` package, whose numba/llvmlite chain does not resolve
 # against this project's numpy on Python 3.11. See track_b/attribution.py.
 ml = [
-    "lightgbm>=4.5",
     "scikit-learn>=1.5",
     "torch>=2.5",
 ]

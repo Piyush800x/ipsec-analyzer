@@ -934,6 +934,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "jinja2" },
+    { name = "lightgbm" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "polars" },
@@ -956,7 +957,6 @@ dev = [
     { name = "types-pyyaml" },
 ]
 ml = [
-    { name = "lightgbm" },
     { name = "scikit-learn" },
     { name = "torch" },
 ]
@@ -975,6 +975,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "greenlet", specifier = ">=3.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "lightgbm", specifier = ">=4.5" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "polars", specifier = ">=1.44.1" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -996,7 +997,6 @@ dev = [
     { name = "types-pyyaml", specifier = ">=6.0.12.20260815" },
 ]
 ml = [
-    { name = "lightgbm", specifier = ">=4.5" },
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "torch", specifier = ">=2.5" },
 ]
