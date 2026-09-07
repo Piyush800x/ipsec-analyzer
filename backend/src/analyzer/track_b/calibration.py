@@ -49,6 +49,12 @@ literature use, and PRD section 8.4's 0.10 threshold is stated against it."""
 MAX_TEMPERATURE_STEPS: Final = 200
 
 
+def _softmax(values: np.ndarray) -> np.ndarray:
+    shifted = values - values.max(axis=1, keepdims=True)
+    exp = np.exp(shifted)
+    return np.asarray(exp / exp.sum(axis=1, keepdims=True), dtype=np.float64)
+
+
 def expected_calibration_error(
     probabilities: np.ndarray, y_true: np.ndarray, *, bins: int = ECE_BINS
 ) -> float:
@@ -149,6 +155,28 @@ def fit_temperature(logits: np.ndarray, y_true: np.ndarray) -> Temperature:
     if not len(y_true):
         log.warning("the calibration fold is empty; leaving the CNN uncalibrated (T=1.0)")
         return Temperature(value=1.0, ece_before=0.0, ece_after=0.0)
+
+    # A fold the model never gets wrong makes temperature scaling degenerate.
+    # NLL is then monotonically decreasing in confidence, so the optimiser
+    # drives T towards zero -- and a T well below 1 does not calibrate, it
+    # sharpens every prediction towards 1.0. The model would go on to be wrong
+    # in deployment at essentially 100% confidence, which is the single most
+    # dangerous thing a number in a security report can be.
+    #
+    # There is no temperature that fixes this, because the fold contains no
+    # information about how wrong the model is when it is wrong. Reporting
+    # T=1.0 with the reason is the only honest answer.
+    if (softmax_argmax := np.asarray(logits).argmax(axis=1) == y_true).all():
+        log.warning(
+            "the calibration fold contains no errors (%d/%d correct), so temperature "
+            "scaling is degenerate and would drive confidence to 1.0. Leaving the CNN "
+            "uncalibrated (T=1.0)",
+            int(softmax_argmax.sum()),
+            len(y_true),
+        )
+        uncalibrated = _softmax(logits)
+        ece = expected_calibration_error(uncalibrated, y_true)
+        return Temperature(value=1.0, ece_before=ece, ece_after=ece)
 
     def softmax(values: np.ndarray) -> np.ndarray:
         shifted = values - values.max(axis=1, keepdims=True)

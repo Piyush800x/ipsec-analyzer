@@ -55,6 +55,29 @@ log = logging.getLogger(__name__)
 MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
 
 
+def _absent_classes(windows: list[Window]) -> dict[str, str]:
+    """PRD section 9.2 classes that produced no scorable window, with the reason.
+
+    Recorded rather than inferred from a short label list, because the two
+    situations a reader must tell apart -- "this dataset has no messaging
+    sessions" and "messaging sessions exist and every window was discarded" --
+    look identical from the outside.
+    """
+    from analyzer.core.enums import TrafficClass
+
+    present = {window.traffic_class for window in windows}
+    return {
+        member.value: (
+            "sessions were generated but every window fell below LLD section "
+            "7.6's 20-packet floor, so the class contributes no training rows. "
+            "See CHANGELOG.md, 'LLD section 7.6's window floor makes PRD section "
+            "9.2's sparsest class unlearnable'"
+        )
+        for member in TrafficClass
+        if member.value not in present
+    }
+
+
 def _evaluation_dict(evaluation: Evaluation) -> dict[str, Any]:
     data = asdict(evaluation)
     data["labels"] = list(evaluation.labels)
@@ -97,6 +120,13 @@ def train_all(sessions_dir: Path, models_dir: Path, *, epochs: int = 60) -> dict
         "windows": {name: len(matrix.y) for name, matrix in folds.items()},
         "configurations": {name: len(set(matrix.config_names)) for name, matrix in folds.items()},
         "sessions_total": len({window.session_name for window in windows}),
+        # Which of PRD section 9.2's classes never reached the model, and why.
+        # A macro-F1 is an average over a class list, so a reader who does not
+        # know the list cannot interpret the number: six classes perfectly
+        # classified scores 6/7 = 0.857 against a seven-class target, which
+        # would sit just above PRD section 8.4's 0.85 threshold while the model
+        # had never seen a seventh of the problem.
+        "classes_absent": _absent_classes(windows),
         # Kept so step 9.12 can hold the ESP-geometry features at the training
         # mean when scoring external captures that have no ESP geometry. Zero
         # would be a measurement there, and the wrong one.

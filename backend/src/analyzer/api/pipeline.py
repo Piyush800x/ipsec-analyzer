@@ -82,11 +82,23 @@ def _pfs_sizes(sizes: list[ExchangeSizes], pair: SAPair) -> dict[str, tuple[int,
 
     Empty tuples when nothing matches, which ``infer_pfs`` reports as
     UNAVAILABLE with the reason rather than as an absence of PFS.
+
+    The baseline is ``ke_free_create_child``, which is always empty, rather
+    than the INFORMATIONAL sizes that are sitting right there. Using those
+    inverts the answer for every ECP group: measured on a real PFS-on
+    ECP-256 rekey, the delta against INFORMATIONAL is 160 bytes where the KE
+    payload accounts for 72, because an INFORMATIONAL exchange also lacks the
+    SA proposal, the nonce and both traffic selectors. So PFS is reported UNAVAILABLE
+    until a genuine KE-free CREATE_CHILD_SA baseline exists, rather than
+    reported backwards.
     """
     key = pair.forward.key
     for entry in sizes:
         if entry.matches(key.src, key.dst):
-            return {"create_child_sizes": entry.create_child, "baseline_sizes": entry.baseline}
+            return {
+                "create_child_sizes": entry.create_child,
+                "baseline_sizes": entry.ke_free_create_child,
+            }
     return {"create_child_sizes": (), "baseline_sizes": ()}
 
 

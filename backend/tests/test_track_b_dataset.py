@@ -430,3 +430,40 @@ class TestLoadDataset:
 
         assert {w.config_name for w in windows} == {"cfg-a"}
         assert {w.session_name for w in windows} == {"cfg-a", "cfg-a-r2"}
+
+    def test_a_flawless_calibration_fold_does_not_sharpen_to_certainty(self) -> None:
+        """The degenerate case, and the reason it is dangerous.
+
+        Temperature scaling minimises NLL. On a fold the model never gets
+        wrong, NLL falls monotonically as confidence rises, so the optimiser
+        drives the temperature towards zero -- which does not calibrate, it
+        pushes every prediction to 1.0. The real dataset produced T=0.0375
+        this way. A model calibrated like that is wrong in deployment at
+        essentially 100% confidence, which is the worst thing a number in a
+        security report can be.
+
+        No temperature fixes it: a fold with no errors carries no information
+        about how wrong the model is when it is wrong. T=1.0 is the only
+        honest answer.
+        """
+        logits = np.array([[6.0, 0.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.0, 6.0]] * 20)
+        y = np.array([0, 1, 2] * 20)
+
+        temperature = fit_temperature(logits, y)
+
+        assert temperature.value == 1.0
+        assert (temperature.apply(logits).max(axis=1) < 0.999).all(), (
+            "a degenerate fit must leave confidences alone, not drive them to certainty"
+        )
+
+    def test_a_fold_with_errors_still_calibrates(self) -> None:
+        """The guard must not swallow the case temperature scaling is for."""
+        rng = np.random.default_rng(7)
+        logits = rng.normal(size=(300, 3)) * 6.0
+        y = logits.argmax(axis=1).copy()
+        y[::4] = (y[::4] + 1) % 3
+
+        temperature = fit_temperature(logits, y)
+
+        assert temperature.value != 1.0
+        assert temperature.ece_after <= temperature.ece_before

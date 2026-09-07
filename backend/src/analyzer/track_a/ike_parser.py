@@ -84,11 +84,12 @@ IKE_EXCHANGE_TYPE_AGGRESSIVE: Final = 4
 
 IKE_EXCHANGE_TYPE_CREATE_CHILD_SA: Final = 36
 IKE_EXCHANGE_TYPE_INFORMATIONAL: Final = 37
-"""RFC 7296 section 1.2-1.4 exchange types. Step 9.4 measures the size delta
-between the two: a CREATE_CHILD_SA carrying a KE payload is larger than one
-that does not by the DH group's public-value size, and an INFORMATIONAL
-exchange over the same SA is the nearest thing to a KE-free baseline that a
-capture offers."""
+"""RFC 7296 section 1.2-1.4 exchange types.
+
+Step 9.4 measures how much larger a CREATE_CHILD_SA carrying a KE payload is
+than one that does not. An INFORMATIONAL exchange looks like the nearest
+available stand-in for the second and **is not one** -- see
+``ExchangeSizes.informational``."""
 
 NOTIFY_NAT_DETECTION_SOURCE_IP: Final = 16388
 NOTIFY_NAT_DETECTION_DESTINATION_IP: Final = 16389
@@ -855,23 +856,56 @@ class ExchangeSizes:
     src: str
     dst: str
     create_child: tuple[int, ...]
-    baseline: tuple[int, ...]
+    informational: tuple[int, ...]
+    """INFORMATIONAL exchange sizes.
+
+    **Not a PFS baseline, despite being the obvious candidate.** LLD section
+    7.4 measures the size a KE payload adds to a CREATE_CHILD_SA, so the
+    baseline has to be a CREATE_CHILD_SA *without* one. An INFORMATIONAL
+    exchange is not that: it also lacks the SA proposal, the nonce and both
+    traffic-selector payloads, which on a real capture measured 88 bytes --
+    larger than the entire 72-byte KE payload of an ECP-256 group.
+
+    Using it as the baseline inverts the answer for every ECP group: a PFS-on
+    tunnel shows a 160-byte delta against an expected 72 and is reported
+    PFS-off, while a PFS-off tunnel shows 88 and is reported PFS-on. It
+    happens to give the right answer for MODP-2048 only because the 264-byte
+    KE payload dominates the unmodelled 88 and the tolerance is generous.
+
+    Kept because the series is real and worth having; passed to ``infer_pfs``
+    as a baseline by nothing.
+    """
 
     def matches(self, src: str, dst: str) -> bool:
         return {self.src, self.dst} == {src, dst}
+
+    @property
+    def ke_free_create_child(self) -> tuple[int, ...]:
+        """CREATE_CHILD_SA exchanges known to carry no KE payload.
+
+        Always empty, and deliberately so. Distinguishing a rekey that carried
+        a fresh key exchange from one that did not is precisely the question
+        ``infer_pfs`` is asked, so an implementation that answered it here
+        would be assuming its own conclusion. A capture of a uniformly
+        configured tunnel contains only one kind, and nothing in it says which.
+
+        The property exists to make the absence explicit at the call site
+        rather than leaving a caller to reach for ``informational`` because it
+        is the only other series available.
+        """
+        return ()
 
 
 def exchange_sizes(messages: Sequence[IsakmpMessage]) -> list[ExchangeSizes]:
     """Collect per-endpoint-pair CREATE_CHILD_SA and INFORMATIONAL sizes.
 
-    INFORMATIONAL is the baseline because it is the one IKEv2 exchange that
-    never carries a KE payload and is routinely present -- every tunnel this
-    testbed tears down sends a DELETE inside one. A capture with no
-    INFORMATIONAL exchange yields an empty baseline, and ``infer_pfs`` reports
-    UNAVAILABLE with that reason rather than measuring against nothing.
+    INFORMATIONAL sizes are collected because they are real and cheap to gather,
+        **but they are not a PFS baseline** -- see ``ExchangeSizes.informational``
+        for the measurement showing that using them inverts the answer for every
+        ECP group.
 
-    IKEv1 is absent by construction: it has no CREATE_CHILD_SA, its Quick Mode
-    rekeys are encrypted, and LLD section 7.4's method does not apply to them.
+        IKEv1 is absent by construction: it has no CREATE_CHILD_SA, its Quick Mode
+        rekeys are encrypted, and LLD section 7.4's method does not apply to them.
     """
     grouped: dict[tuple[str, str], tuple[list[int], list[int]]] = {}
     for message in messages:
@@ -885,13 +919,18 @@ def exchange_sizes(messages: Sequence[IsakmpMessage]) -> list[ExchangeSizes]:
                 message.src,
             )
         )
-        create_child, baseline = grouped.setdefault(key, ([], []))
+        create_child, informational = grouped.setdefault(key, ([], []))
         if message.exchange_type == IKE_EXCHANGE_TYPE_CREATE_CHILD_SA:
             create_child.append(message.length)
         elif message.exchange_type == IKE_EXCHANGE_TYPE_INFORMATIONAL:
-            baseline.append(message.length)
+            informational.append(message.length)
 
     return [
-        ExchangeSizes(src=src, dst=dst, create_child=tuple(create_child), baseline=tuple(baseline))
-        for (src, dst), (create_child, baseline) in grouped.items()
+        ExchangeSizes(
+            src=src,
+            dst=dst,
+            create_child=tuple(create_child),
+            informational=tuple(informational),
+        )
+        for (src, dst), (create_child, informational) in grouped.items()
     ]

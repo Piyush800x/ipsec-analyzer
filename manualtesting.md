@@ -64,12 +64,16 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-13 | The seven traffic classes look different | 2.6 | 2026-09-04 | Pass |
 | MT-14 | A batch resumes where it was killed | 2.10 | 2026-09-04 | Pass |
 | MT-15 | Reader packet count matches tshark on a real capture | 3.2 | — | **Not run** |
-| MT-16 | Track A matches labels.json on a real testbed capture | 4.8 | — | **Not run** |
+| MT-16 | Track A matches labels.json on a real testbed capture | 4.8 | 2026-09-07 | Pass (248 sessions, 0 mismatch) |
 | MT-17 | Both reports read correctly to their audience | 10.2, 10.3 | 2026-09-05 | Pass |
 | MT-18 | The offline stack runs with no outbound network | 11.4 | — | **Not run** |
 | MT-19 | Demo rehearsal, three clean runs | 11.6 | — | **Not run** |
 | MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 | Pass (both) |
 | MT-21 | A real capture goes through the running API end to end | 6.7, 10.4 | 2026-09-06 | Pass |
+| MT-22 | Every traffic class carries real traffic over IPv6 | 2.6, 8.3 | 2026-09-07 | Pass |
+| MT-23 | Concurrent shards produce one complete, disjoint dataset | 8.3 | 2026-09-07 | Pass |
+| MT-24 | The model card describes the artefacts actually on disk | 9.8 | — | **Not run** |
+| MT-25 | A tunnel still rekeys, and does it on time | 9.3 | 2026-09-07 | Pass |
 
 ---
 
@@ -908,3 +912,176 @@ Copy this. Keep it short enough that someone will actually run it.
 
 Then add a row to the Status table, and note the new check in
 [CHANGELOG.md](CHANGELOG.md) under the step that introduced it.
+
+---
+
+## MT-22 — Every traffic class carries real traffic over IPv6
+
+**Proves** the IPv6 generator fix. Half the sampled matrix is IPv6, and for
+Phases 2 through 8 every one of those sessions brought its tunnel up, generated
+nothing, and was written with a `labels.json` claiming 90 seconds of its class.
+The captures held eight to eleven packets: the IKE exchange and the DELETE.
+
+The automated tests catch the *command lines* — `tests/test_testbed_traffic.py`
+asserts that no listener binds `0.0.0.0` and no IPv6 literal appears unbracketed
+in a URL, for every class in both families. They cannot catch a tool that
+accepts its arguments and still sends nothing, which is why a person runs this.
+
+```bash
+cd backend
+uv run python - <<'PY'
+import asyncio
+from pathlib import Path
+from testbed.config import IpVersion
+from testbed.orchestrator import run_session
+from testbed.sampler import load_matrix, sample_configs
+
+out = Path("/tmp/mt22")
+configs = {c.traffic: c for c in sample_configs(load_matrix()) if c.ip is IpVersion.V6}
+for traffic, cfg in sorted(configs.items(), key=lambda kv: kv[0].value):
+    session = cfg.model_copy(update={"duration_s": 40, "address_index": 5})
+    try:
+        result = asyncio.run(run_session(session, out))
+        print(f"{traffic.value:14s} {result.packet_count:7d} packets")
+    except Exception as exc:
+        print(f"{traffic.value:14s} FAILED: {exc}")
+PY
+```
+
+**Expect** every class in the hundreds or thousands, never in the tens. A count
+below the ESP floor now raises rather than being written, so a regression shows
+as `FAILED: the tunnel came up but carried almost nothing` — but read the
+numbers anyway. A class that fell from thousands to fifty would clear the floor
+and still be broken.
+
+> Last verified 2026-09-07 · icmp 410, messaging 32, file_transfer 56201,
+> web 21873, video 4969, voip 3976 over 40s; email 705 · Pass · email needed
+> `libio-socket-inet6-perl` and `netbase` in the peer image before swaks would
+> speak IPv6 at all.
+
+---
+
+## MT-23 — Concurrent shards produce one complete, disjoint dataset
+
+**Proves** step 8.3's sharding. Several processes writing into one directory,
+each on its own Docker subnet and its own manifest, must between them produce
+every configuration exactly once. The two failure modes are silent and opposite:
+a session generated twice wastes an hour, one generated never leaves a hole that
+surfaces only as a missing configuration during training.
+
+```bash
+cd backend
+for i in 1 2 3 4 5 6; do
+  uv run python -m testbed.batch ../dataset/sessions \
+      --repeats 4 --duration 90 --shard $i/6 > ../dataset/gen6-$i.log 2>&1 &
+done
+wait
+
+uv run python - <<'PY'
+from pathlib import Path
+from testbed.sampler import load_matrix, sample_configs, with_repeats
+
+expected = {c.name for c in with_repeats(sample_configs(load_matrix()), 4)}
+on_disk = {p.name for p in Path("../dataset/sessions").iterdir() if p.is_dir()}
+print(f"expected {len(expected)}, on disk {len(on_disk)}")
+print("missing:", sorted(expected - on_disk)[:10])
+print("unexpected:", sorted(on_disk - expected)[:10])
+PY
+```
+
+**Expect** `unexpected` empty, and `missing` empty or a short list the logs
+record as failed — `grep failed: ../dataset/gen6-*.log` — rather than sessions
+that vanished without a reason.
+
+Watch for `Pool overlaps with other one on this address space` in any log. That
+means two shards drew the same subnet, which `--shard I/N` setting
+`address_index` to `I-1` should make impossible, and it fails every session in
+the losing shard.
+
+**If changing the shard count**, seed the new manifests first. They are named
+`manifest-I-of-N.json`, so going from 3 shards to 6 starts with empty manifests
+and regenerates everything already done.
+
+> Last verified 2026-09-07 · 6 shards, 248/248 sessions, 0 failures, 14 GB ·
+> Pass · shards completed in 1435–1640s each having skipped 26–28 seeded
+> sessions apiece.
+
+---
+
+## MT-24 — The model card describes the artefacts actually on disk
+
+**Proves** step 9.8's documentation half. `docs/model-card.md` is generated from
+`models/metrics.json`, and the reason it is generated rather than written is
+that a hand-written card describes the run someone remembers.
+
+```bash
+cd backend
+uv run python -m analyzer.track_b.model_card
+git diff --stat ../docs/model-card.md
+```
+
+**Expect** no diff. A diff means the card in git was written against different
+artefacts than the ones in `models/`, so the numbers a reader would quote are
+not the numbers the deployment produces.
+
+Then read it, and check two things by eye:
+
+1. **The class count.** If the card opens with "This is an N-class model, not a
+   7-class one", every macro-F1 in it is averaged over N classes and must not be
+   compared to PRD §8.4's target as though it covered seven. Six classes handled
+   perfectly averages 0.857, which clears a 0.85 threshold while a seventh of
+   the problem was never attempted.
+2. **The Limitations section** is still true of this build, and any target
+   marked `**NOT MET**` is recorded as unmet in [CHANGELOG.md](CHANGELOG.md)
+   rather than only here.
+
+---
+
+## MT-25 — A tunnel still rekeys, and does it on time
+
+**Proves** step 9.3, and guards a failure no automated test can see: a change to
+the lifetime settings that stops SAs rekeying at all.
+
+Nothing in the sampled matrix demonstrates this. Every matrix row runs a
+3600-second lifetime for 90 seconds, so no dataset session ever rekeys inside
+its own capture — right for a dataset, useless for this measurement.
+`testbed/rekey_probe.py` exists to make it happen.
+
+```bash
+cd backend
+uv run python -m testbed.rekey_probe /tmp/mt25
+
+uv run python - <<'PY'
+from pathlib import Path
+from analyzer.ingest.flow import assemble_flows
+from analyzer.ingest.reader import read_packets
+from analyzer.track_b import replay
+
+result = read_packets(Path("/tmp/mt25/rekey-300s/capture.pcap"))
+series = replay.spi_series(assemble_flows(result.packets))
+for (src, dst), entries in series.items():
+    base = entries[0][1]
+    print(f"{src} -> {dst}: offsets {[round(ts - base, 1) for _, ts in entries]}")
+    print(f"   observed_rekey_s = {replay.observed_rekey_s(entries).value}")
+PY
+```
+
+**Expect** at least three SPIs per direction, at offsets near 0, 290 and 580,
+and an `observed_rekey_s` within 10% of 300. Two rotations rather than one is
+the point: a single rotation cannot distinguish "rekeyed on time" from "rekeyed
+once, for some other reason".
+
+**Two failures to watch for**, neither of which looks like a failure:
+
+- **Two SPIs and a capture that stops dead at the rekey moment.** `over_time` is
+  too small for the rekey to complete — strongSwan *deletes* an SA that has not
+  rekeyed within `rekey_time + over_time`, so a zero window expires it at the
+  instant it tries. The session is still recorded as successful, and the traffic
+  before the expiry is real, so the ESP-count guard does not catch it.
+- **An interval of 0 at 0.95 confidence.** The SPI series was built from one
+  `SAPair`'s two directions, which come up together, rather than across
+  generations. See `replay.spi_series`.
+
+> Last verified 2026-09-07 · 700s capture, 55288 packets, SPI offsets
+> 0/288.5/578.5 in both directions, observed_rekey_s 290 vs 300 configured
+> (3.3%) · Pass

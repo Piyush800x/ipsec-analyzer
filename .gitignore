@@ -60,6 +60,7 @@ backend/models/calibration.json
 dataset/gen*.log
 dataset/pilot*.log
 dataset/verify.log
+dataset/train.log
 
 # metrics.json, reliability_cnn.json and external_validation.json are NOT
 # ignored, deliberately. They are the *measurements* -- what the models scored

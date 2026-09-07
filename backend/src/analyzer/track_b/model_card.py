@@ -48,6 +48,43 @@ def _verdict(value: float, target: float, *, lower_is_better: bool = False) -> s
     return f"{'met' if met else '**NOT MET**'} ({value:.4f} {comparison} {target} is the target)"
 
 
+def _absent_classes_section(metrics: dict[str, Any]) -> list[str]:
+    """State plainly which classes the score is *not* computed over.
+
+    Every macro-F1 below is an average across the classes the model was trained
+    on. If that is fewer than PRD section 9.2's seven, the headline number means
+    something different from what a reader will assume, and the difference is
+    large: six classes handled perfectly averages to 0.857 against a
+    seven-class expectation -- above PRD section 8.4's 0.85 threshold, with a
+    seventh of the problem never attempted.
+    """
+    absent = metrics.get("classes_absent") or {}
+    if not absent:
+        return []
+
+    trained = len(metrics.get("labels", []))
+    total = trained + len(absent)
+    subject = "One class" if len(absent) == 1 else f"{len(absent)} classes"
+    verb = "was" if len(absent) == 1 else "were"
+    lines = [
+        f"> **This is a {trained}-class model, not a {total}-class one.**",
+        ">",
+        f"> Every macro-F1 below is averaged over {trained} classes. {subject} produced",
+        f"> no scorable window and {verb} never trained on or tested against:",
+        ">",
+    ]
+    for label, reason in sorted(absent.items()):
+        lines.append(f"> - **`{label}`** — {reason}")
+    lines += [
+        ">",
+        f"> A {trained}-class model that was perfect would average "
+        f"{trained}/{total} = {trained / total:.3f} against a {total}-class "
+        "expectation. Compare these numbers to the target with that in mind.",
+        "",
+    ]
+    return lines
+
+
 def _class_table(evaluation: dict[str, Any]) -> list[str]:
     lines = ["| Class | F1 | Support (windows) |", "|---|---|---|"]
     per_class = evaluation.get("per_class_f1", {})
@@ -114,6 +151,9 @@ def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> s
         "of the train/test boundary and report a memory test as an accuracy. A",
         "configuration's repeat runs are held together for the same reason one level up.",
         "",
+    ]
+    lines += _absent_classes_section(metrics)
+    lines += [
         "## ML-1 — LightGBM baseline (step 9.6)",
         "",
         f"Held-out macro-F1: **{gbm.get('test', {}).get('macro_f1', 0.0):.4f}**, "
@@ -203,6 +243,30 @@ def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> s
         ]
 
     lines += [
+        "",
+        "## How to read a near-perfect score",
+        "",
+        "The numbers above are high enough to be suspicious, and the suspicion is",
+        "warranted. Two things were checked before publishing them.",
+        "",
+        "**It is not leakage.** The train, calibration and test folds hold disjoint",
+        "sets of *configurations*, verified directly rather than assumed: no",
+        "configuration appears in two folds and no session's windows span a fold",
+        "boundary. `tests/test_track_b_dataset.py` asserts both properties.",
+        "",
+        "**It is a nearly separable task.** This testbed's seven classes are produced",
+        "by different tools at rates differing by orders of magnitude, and they",
+        "separate on single features. Mean `packet_count` per 10-second window on the",
+        "test fold runs icmp ~105, email ~307, voip ~902, video ~1824, web ~4627,",
+        "file_transfer ~18071; `up_down_byte_ratio` runs web 0.03, icmp and voip 1.0,",
+        "email ~31, file_transfer ~812, video ~3833. A one-feature decision stump",
+        "separates most of them.",
+        "",
+        "So the score measures **how distinct this testbed's generators are**, not how",
+        "well the model would classify real traffic. The only measurement that would",
+        "answer the second question is the external validation below, and it has not",
+        "been run. Treat these figures as a lower bound on the difficulty of the task",
+        "as posed, not as evidence of generalisation.",
         "",
         "## Limitations",
         "",

@@ -482,7 +482,7 @@ def _sized(exchange_type: int, length: int, *, version: str = "2.0") -> dict:
     return packet(frame_number=1, ts=0.0, src="10.0.0.1", dst="10.0.0.2", isakmp=header)
 
 
-def test_exchange_sizes_separate_create_child_from_baseline() -> None:
+def test_exchange_sizes_separate_create_child_from_informational() -> None:
     from analyzer.track_a.ike_parser import (
         IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
         IKE_EXCHANGE_TYPE_INFORMATIONAL,
@@ -500,47 +500,52 @@ def test_exchange_sizes_separate_create_child_from_baseline() -> None:
     (sizes,) = exchange_sizes(messages)
 
     assert sizes.create_child == (400, 404)
-    assert sizes.baseline == (80,)
+    assert sizes.informational == (80,)
 
 
-def test_exchange_sizes_group_both_directions_together() -> None:
-    """An IKE SA that rekeys itself changes SPI; the exchanges either side of
-    that are the same tunnel's rekeys and belong in one series."""
-    from analyzer.track_a.ike_parser import IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, exchange_sizes
+def test_informational_exchanges_are_never_offered_as_a_pfs_baseline() -> None:
+    """The correction this pins cost a *backwards* security finding.
 
-    forward = _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 400)
-    reverse = packet(
-        frame_number=2,
-        ts=1.0,
-        src="10.0.0.2",
-        dst="10.0.0.1",
-        isakmp={
-            **isakmp_header(
-                version="2.0",
-                exchange_type=IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
-                init_spi="bbbb000000000000",
-            ),
-            "isakmp.length": "396",
-        },
+    LLD section 7.4 measures how much a KE payload adds to a CREATE_CHILD_SA,
+    so the baseline must be a CREATE_CHILD_SA without one. An INFORMATIONAL
+    exchange also lacks the SA proposal, the nonce and both traffic selectors:
+    measured on a real PFS-on ECP-256 rekey, the delta against INFORMATIONAL
+    was 160 bytes where the KE payload accounts for only 72.
+
+    Used as a baseline that inverts the answer for every ECP group -- PFS-on
+    reports False, PFS-off reports True -- and gets MODP right only because a
+    264-byte KE payload dominates the unmodelled 88 bytes.
+    """
+    from analyzer.track_a.ike_parser import (
+        IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+        IKE_EXCHANGE_TYPE_INFORMATIONAL,
+        exchange_sizes,
     )
 
-    assert len(exchange_sizes(parse_isakmp_json([forward, reverse]))) == 1
+    (sizes,) = exchange_sizes(
+        parse_isakmp_json(
+            [
+                _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 240),
+                _sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80),
+            ]
+        )
+    )
+
+    assert sizes.informational == (80,)
+    assert sizes.ke_free_create_child == (), (
+        "a capture of a uniformly configured tunnel contains no KE-free "
+        "CREATE_CHILD_SA, and nothing in it says which kind its rekeys are"
+    )
 
 
-def test_ikev1_contributes_no_exchange_sizes() -> None:
-    """IKEv1 has no CREATE_CHILD_SA and its Quick Mode rekeys are encrypted, so
-    LLD section 7.4's method does not apply to it at all."""
-    from analyzer.track_a.ike_parser import exchange_sizes
+def test_pfs_is_unavailable_rather_than_backwards_without_a_real_baseline() -> None:
+    """Step 9.4 on a real capture, and the honest answer to it.
 
-    messages = parse_isakmp_json([_sized(IKE_EXCHANGE_TYPE_MAIN, 400, version="1.0")])
-
-    assert exchange_sizes(messages) == []
-
-
-def test_pfs_is_inferred_from_real_exchange_sizes() -> None:
-    """Step 9.4's Done when, over the parser's own output rather than
-    hand-built size lists: a DH-14 rekey carrying a 256-byte public value is
-    separated from one that does not."""
+    With no KE-free CREATE_CHILD_SA to measure against, ``infer_pfs`` must
+    report UNAVAILABLE. The alternative -- measuring against an INFORMATIONAL
+    exchange -- produced INFERRED False at 0.65 confidence for a tunnel whose
+    ground truth is PFS *on*.
+    """
     from analyzer.core.enums import Provenance
     from analyzer.track_a.ike_parser import (
         IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
@@ -549,18 +554,46 @@ def test_pfs_is_inferred_from_real_exchange_sizes() -> None:
     )
     from analyzer.track_b.pfs import infer_pfs
 
-    baseline = [_sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80)]
-    with_ke = parse_isakmp_json(
-        [*baseline, _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 80 + 256 + 40)]
+    (sizes,) = exchange_sizes(
+        parse_isakmp_json(
+            [
+                _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 240),
+                _sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80),
+            ]
+        )
     )
-    without_ke = parse_isakmp_json([*baseline, _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 80 + 40)])
 
-    on = exchange_sizes(with_ke)[0]
-    off = exchange_sizes(without_ke)[0]
+    attribute = infer_pfs(sizes.create_child, sizes.ke_free_create_child, 19)
 
-    pfs_on = infer_pfs(on.create_child, on.baseline, 14)
-    pfs_off = infer_pfs(off.create_child, off.baseline, 14)
+    assert attribute.provenance is Provenance.UNAVAILABLE
+    assert attribute.value is None
+    assert (attribute.note or "").strip()
 
-    assert pfs_on.provenance is Provenance.INFERRED
-    assert pfs_on.value is True
-    assert pfs_off.value is False
+
+def test_infer_pfs_still_works_given_a_genuine_baseline() -> None:
+    """The method itself is sound; only the baseline was wrong.
+
+    Given real KE-free CREATE_CHILD_SA sizes, a DH-14 rekey carrying a
+    256-byte public value is separated from one that does not -- step 9.4's
+    Done when, on the inputs the method actually calls for.
+    """
+    from analyzer.core.enums import Provenance
+    from analyzer.track_b.pfs import infer_pfs
+
+    ke_free = (240, 240, 240)
+    with_ke = tuple(size + 264 for size in ke_free)
+
+    on = infer_pfs(with_ke, ke_free, 14)
+    off = infer_pfs(ke_free, ke_free, 14)
+
+    assert on.provenance is Provenance.INFERRED
+    assert on.value is True
+    assert off.value is False
+    assert on.confidence is not None
+    assert off.confidence is not None
+
+    ecp = infer_pfs(with_ke, ke_free, 19)
+    assert ecp.confidence is not None
+    assert ecp.confidence < on.confidence, (
+        "ECP groups add far fewer bytes, so the same delta is weaker evidence"
+    )

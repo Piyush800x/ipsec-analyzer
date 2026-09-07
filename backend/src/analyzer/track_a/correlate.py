@@ -297,23 +297,26 @@ def assemble_security_association(
         prf_alg=prf_attr,
         dh_group=dh_group_attr,
         operating_mode=Attribute.unavailable(
-            "not carried in any cleartext IKE field; inferred from encapsulation "
-            "overhead (PRD section 7, LLD section 7.3), which Track B does not "
-            "yet implement"
+            "not carried in any cleartext IKE field. Track B infers it from "
+            "encapsulation overhead and endpoint role (PRD section 7, LLD "
+            "section 7.3); this value is what Track A alone can say"
         ),
         pfs_enabled=Attribute.unavailable(
-            "PFS is inferred from CREATE_CHILD_SA message sizes (LLD section 7.4), "
-            "which Track B does not yet implement"
+            "PFS is inferred from CREATE_CHILD_SA message sizes (LLD section "
+            "7.4), which Track B does from the exchange sizes this module "
+            "extracts; this value is what Track A alone can say"
         ),
         auth_method=auth_attr,
         negotiated_lifetime_s=lifetime_attr,
         observed_rekey_s=Attribute.unavailable(
-            "observed rekey interval requires SPI-rotation timing analysis "
-            "(LLD section 7.5), which Track B does not yet implement"
+            "the observed rekey interval requires SPI-rotation timing across "
+            "the whole capture (LLD section 7.5), which is Track B's; this "
+            "value is what Track A alone can say"
         ),
         esn_negotiated=esn_attr,
         replay_sane=Attribute.unavailable(
-            "sequence-number analysis (LLD section 7.5) is Track B's job and is not yet implemented"
+            "sequence-number analysis (LLD section 7.5) is Track B's; this "
+            "value is what Track A alone can say"
         ),
         nat_traversal=nat_attr,
         downgrade_available=(

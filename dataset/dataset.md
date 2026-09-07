@@ -138,11 +138,61 @@ University of New Brunswick directly.
 
 ## 8. What the generation run produced
 
-<!-- Filled in from the run itself. See CHANGELOG.md under Phase 8 for the
-     failures along the way, which are the more useful record. -->
+Generated 2026-09-07 by six concurrent shards (`--repeats 4 --duration 90
+--shard I/6`), 14 GB on disk.
 
-*(Counts and per-class window totals are recorded here once the run and its
-verification complete; see CHANGELOG.md for the authoritative narrative.)*
+| | |
+|---|---|
+| Sessions | **248** — 62 configurations x 4 traffic runs. PRD §9.3 asks for at least 200 |
+| Failures | **0** |
+| Wall clock | ~1435-1640s per shard, six in parallel |
+| Track A vs ground truth | **PASS** — 1072 match, 664 honest_gap, 744 inferred, 248 not_reported, **0 mismatch, 0 fabricated** |
+
+`fabricated` — a value reported where ground truth says the field is
+unobservable — is the outcome that would matter most, and there are none. The
+248 `not_reported` are one per session and all the same field, `pfs_enabled`:
+Track A alone cannot determine PFS, and no dataset session rekeys inside its
+own capture for Track B to measure it from either. See CHANGELOG.md.
+
+Balanced by construction, because the sampler is pairwise over the matrix
+rather than random:
+
+| Dimension | Split |
+|---|---|
+| IP version | v4 124 / v6 124 |
+| Operating mode | transport 124 / tunnel 124 |
+| IKE | ikev1-aggressive 84 / ikev1-main 80 / ikev2 84 |
+
+| Traffic class | Sessions | Scorable 10s windows per session |
+|---|---|---|
+| email | 32 | ~14-19 |
+| file_transfer | 48 | ~18 |
+| icmp | 28 | ~18-19 |
+| **messaging** | 32 | **0 — see below** |
+| video | 32 | ~18 |
+| voip | 36 | ~18 |
+| web | 40 | ~19 |
+
+### `messaging` contributes no training rows
+
+At roughly one packet per second, a 10-second window holds seven to ten
+packets. LLD §7.6 scores a window only above twenty, so **every messaging
+window is discarded** and the class reaches neither training nor test. The
+sessions are on disk and are real; they are simply unscoreable under the
+windowing the LLD specifies, and a longer session does not help because this is
+a rate and not a duration.
+
+The consequence is that the traffic classifier is a six-class model. It is
+reported as one — `models/metrics.json` carries a `classes_absent` block and
+the model card opens by saying so — because a macro-F1 averaged over six
+classes is not comparable to a seven-class target: six handled perfectly
+averages 0.857, which clears PRD §8.4's 0.85 threshold with a seventh of the
+problem never attempted.
+
+This was **not** resolved by raising the messaging packet rate until the
+windows cleared the floor. That would meet a target by changing the data. See
+CHANGELOG.md for the two defensible resolutions, both of which are decisions
+about the specification rather than the code.
 
 ### The failure this dataset nearly shipped with
 
