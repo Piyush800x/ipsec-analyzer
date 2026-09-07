@@ -14,34 +14,45 @@ default ``-g`` would vary between ffmpeg builds.
 from __future__ import annotations
 
 import asyncio
+import random
 
 from testbed.peers import PeerHandle
-from testbed.traffic.base import SETTLE_S, start_background, udp_sink
+from testbed.traffic.base import SETTLE_S, host_for_url, start_background, udp_sink
 
 RTP_PORT = 5008
-BITRATE = "1500k"
-FRAMERATE = 25
-KEYFRAME_INTERVAL = 50
-"""One keyframe every two seconds at 25fps."""
+
+PROFILE_CHOICES = (
+    ("640x480", 25, "1500k", 50),
+    ("640x480", 15, "800k", 30),
+    ("1280x720", 25, "2500k", 50),
+)
+"""(resolution, framerate, bitrate, keyframe interval), varied per run.
+
+Step 8.3's repeats need video sessions that differ the way two real streams
+differ -- a different resolution and bitrate, and therefore a different packet
+rate and a different keyframe rhythm. Each tuple keeps one keyframe every two
+seconds, which is what gives video its periodic large-frame burst and what
+separates it from the flat-rate VoIP stream."""
 
 PACKET_BYTES = 1200
 """Under a 1500-byte MTU with room for the ESP overhead on top, so that the
 tunnel does not fragment the stream and blur the size profile."""
 
 
-async def generate(left: PeerHandle, right: PeerHandle, duration_s: int) -> None:
+async def generate(left: PeerHandle, right: PeerHandle, duration_s: int, seed: int) -> None:
     """Stream video from ``left`` to ``right`` for ``duration_s``."""
+    size, framerate, bitrate, keyframe_interval = random.Random(seed).choice(PROFILE_CHOICES)
     sink = await start_background(right, udp_sink(RTP_PORT), name="video-sink")
     await asyncio.sleep(SETTLE_S)
 
     stream = (
         "ffmpeg -hide_banner -loglevel error -re "
-        f"-f lavfi -i testsrc2=size=640x480:rate={FRAMERATE} "
+        f"-f lavfi -i testsrc2=size={size}:rate={framerate} "
         f"-t {duration_s} "
         "-c:v libx264 -preset ultrafast -tune zerolatency "
-        f"-b:v {BITRATE} -maxrate {BITRATE} -bufsize 3000k "
-        f"-g {KEYFRAME_INTERVAL} -keyint_min {KEYFRAME_INTERVAL} "
-        f"-f rtp rtp://{right.traffic_addr}:{RTP_PORT}?pkt_size={PACKET_BYTES}"
+        f"-b:v {bitrate} -maxrate {bitrate} -bufsize 3000k "
+        f"-g {keyframe_interval} -keyint_min {keyframe_interval} "
+        f"-f rtp rtp://{host_for_url(right.traffic_addr)}:{RTP_PORT}?pkt_size={PACKET_BYTES}"
     )
     sender = await start_background(left, stream, name="video-send")
     try:

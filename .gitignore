@@ -50,6 +50,32 @@ backend/models/*.pkl
 backend/models/*.joblib
 backend/models/*.onnx
 backend/models/*.pt
+# The artefacts inference loads are committed, all 3.3 MB of them: the
+# LightGBM traffic and mode classifiers, their feature/label order, and the
+# isotonic calibration knots. DVC would be the right home for model weights
+# and this project documents it as such -- but no DVC remote is configured, so
+# ignoring them means a teammate's clone has no models, cannot train without
+# the 14 GB dataset that is also not in git, and silently loses every Track B
+# inference to UNAVAILABLE. A few megabytes in git beats a broken checkout.
+#
+# `traffic_cnn.pt` stays out: inference deliberately loads LightGBM rather than
+# the CNN so that torch is not a runtime dependency (see models/README.md), so
+# the checkpoint is a training artefact that no deployment reads.
+backend/models/*.pt
+
+# The batch logs of a generation run. Several megabytes of per-session INFO
+# lines whose useful content is already summarised in CHANGELOG.md.
+dataset/gen*.log
+dataset/pilot*.log
+dataset/verify.log
+dataset/train.log
+
+# metrics.json, reliability_cnn.json and external_validation.json are NOT
+# ignored, deliberately. They are the *measurements* -- what the models scored
+# and on what -- and they are what docs/model-card.md is generated from. The
+# weights are reproducible from the dataset; the record of what they achieved
+# on a particular held-out fold is not, and losing it would leave a model card
+# nobody could check.
 
 # Editors / OS
 .vscode/

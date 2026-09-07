@@ -32,6 +32,28 @@ IKE versions. The only transform attribute IKEv2 defines at all; IKEv1 also
 uses types 1-5 and 11-12 below for what IKEv2 expresses as separate transform
 types or does not negotiate."""
 
+FIXED_KEY_LENGTH_BITS: Final[dict[EncryptionAlg, int]] = {
+    EncryptionAlg.DES_CBC: 56,
+    EncryptionAlg.TRIPLE_DES_CBC: 168,
+}
+"""Ciphers whose key length is fixed by the algorithm rather than negotiated.
+
+A variable-length cipher carries ``ATTR_KEY_LENGTH``; a fixed-length one must
+not, because there is nothing to choose. So the absence of the attribute is
+not missing information for these two -- ``3des-cbc`` *is* 168-bit, the way
+``EncryptionAlg``'s own docstring says it is -- and reporting the length is
+reading the algorithm's definition, not guessing at a value.
+
+Kept to the two ciphers where that is unambiguous. The AEAD members are
+excluded on purpose even though they are commonly deployed at one size: their
+IANA transform IDs do not pin a key length, and inventing one for them would
+be the fabrication this table is careful not to be. Their length comes from
+the attribute or not at all, which is what FR-4.9 requires.
+
+DES is 56 rather than 64: the eight parity bits are not key material, and a
+report that said 64 would overstate the strength of the weakest cipher in the
+matrix."""
+
 # IKEv1-only Phase 1 transform attribute types (RFC 2409 Appendix A). IKEv2
 # expresses ENCR/PRF/INTEG/DH/ESN as distinct *transform types* instead of
 # attributes of a single monolithic transform, so these have no IKEv2
@@ -127,6 +149,16 @@ def ikev2_integrity_alg(transform_id: int) -> IntegrityAlg:
 
 def ikev1_encryption_alg(attr_value: int) -> EncryptionAlg:
     return IKEV1_ENCR.get(attr_value, EncryptionAlg.UNKNOWN)
+
+
+def fixed_key_length_bits(alg: EncryptionAlg) -> int | None:
+    """The key length *entailed* by *alg*, or ``None`` if it is negotiated.
+
+    Callers use this only as a fallback when no key-length attribute was on
+    the wire, so a proposal that carries one always wins -- this never
+    overrides an observation.
+    """
+    return FIXED_KEY_LENGTH_BITS.get(alg)
 
 
 def ikev1_hash_alg(attr_value: int) -> IntegrityAlg:

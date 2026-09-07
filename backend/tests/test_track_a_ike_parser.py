@@ -25,6 +25,8 @@ from analyzer.core.enums import (
 from analyzer.track_a.ike_parser import (
     IKE_EXCHANGE_TYPE_AGGRESSIVE,
     IKE_EXCHANGE_TYPE_MAIN,
+    NOTIFY_NAT_DETECTION_DESTINATION_IP,
+    NOTIFY_NAT_DETECTION_SOURCE_IP,
     TrackAError,
     build_negotiations,
     parse_isakmp_json,
@@ -149,7 +151,10 @@ def test_parse_nat_detection_notify() -> None:
                 version="2.0",
                 exchange_type=IKE_SA_INIT,
                 init_spi="1111111111111111",
-                notify=[notify(16406), notify(16407)],
+                notify=[
+                    notify(NOTIFY_NAT_DETECTION_SOURCE_IP),
+                    notify(NOTIFY_NAT_DETECTION_DESTINATION_IP),
+                ],
             ),
         )
     ]
@@ -157,6 +162,40 @@ def test_parse_nat_detection_notify() -> None:
     (message,) = parse_isakmp_json(raw)
 
     assert message.nat_detected is True
+
+
+def test_nat_detection_notify_types_are_the_rfc_7296_ones() -> None:
+    """Pins the two numbers, because the parser was shipped with the wrong pair.
+
+    Phase 4 used 16406/16407, which are not NAT-detection types in any RFC, so
+    ``nat_detected`` was unreachable and the test above passed anyway -- it
+    asserted the parser agreed with a constant, and both were wrong together.
+    Naming the RFC values literally here is the only way that failure mode
+    cannot come back.
+    """
+    assert NOTIFY_NAT_DETECTION_SOURCE_IP == 16388
+    assert NOTIFY_NAT_DETECTION_DESTINATION_IP == 16389
+
+
+def test_unrelated_notify_is_not_read_as_nat_detection() -> None:
+    raw = [
+        packet(
+            frame_number=1,
+            ts=0.0,
+            src="10.0.0.1",
+            dst="10.0.0.2",
+            isakmp=isakmp_header(
+                version="2.0",
+                exchange_type=IKE_SA_INIT,
+                init_spi="1111111111111111",
+                notify=[notify(16404)],  # MULTIPLE_AUTH_SUPPORTED
+            ),
+        )
+    ]
+
+    (message,) = parse_isakmp_json(raw)
+
+    assert message.nat_detected is False
 
 
 def test_parse_single_proposal_collapses_to_dict_not_list() -> None:
@@ -428,3 +467,133 @@ def test_no_response_yields_selected_none() -> None:
     assert negotiation.selected is None
     assert negotiation.encryption_alg is None
     assert negotiation.resp_spi is None
+
+
+# ===========================================================================
+# Step 9.4's input: exchange sizes for PFS inference
+# ===========================================================================
+
+
+def _sized(exchange_type: int, length: int, *, version: str = "2.0") -> dict:
+    header = isakmp_header(
+        version=version, exchange_type=exchange_type, init_spi="aaaa000000000000"
+    )
+    header["isakmp.length"] = str(length)
+    return packet(frame_number=1, ts=0.0, src="10.0.0.1", dst="10.0.0.2", isakmp=header)
+
+
+def test_exchange_sizes_separate_create_child_from_informational() -> None:
+    from analyzer.track_a.ike_parser import (
+        IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+        IKE_EXCHANGE_TYPE_INFORMATIONAL,
+        exchange_sizes,
+    )
+
+    messages = parse_isakmp_json(
+        [
+            _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 400),
+            _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 404),
+            _sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80),
+        ]
+    )
+
+    (sizes,) = exchange_sizes(messages)
+
+    assert sizes.create_child == (400, 404)
+    assert sizes.informational == (80,)
+
+
+def test_informational_exchanges_are_never_offered_as_a_pfs_baseline() -> None:
+    """The correction this pins cost a *backwards* security finding.
+
+    LLD section 7.4 measures how much a KE payload adds to a CREATE_CHILD_SA,
+    so the baseline must be a CREATE_CHILD_SA without one. An INFORMATIONAL
+    exchange also lacks the SA proposal, the nonce and both traffic selectors:
+    measured on a real PFS-on ECP-256 rekey, the delta against INFORMATIONAL
+    was 160 bytes where the KE payload accounts for only 72.
+
+    Used as a baseline that inverts the answer for every ECP group -- PFS-on
+    reports False, PFS-off reports True -- and gets MODP right only because a
+    264-byte KE payload dominates the unmodelled 88 bytes.
+    """
+    from analyzer.track_a.ike_parser import (
+        IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+        IKE_EXCHANGE_TYPE_INFORMATIONAL,
+        exchange_sizes,
+    )
+
+    (sizes,) = exchange_sizes(
+        parse_isakmp_json(
+            [
+                _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 240),
+                _sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80),
+            ]
+        )
+    )
+
+    assert sizes.informational == (80,)
+    assert sizes.ke_free_create_child == (), (
+        "a capture of a uniformly configured tunnel contains no KE-free "
+        "CREATE_CHILD_SA, and nothing in it says which kind its rekeys are"
+    )
+
+
+def test_pfs_is_unavailable_rather_than_backwards_without_a_real_baseline() -> None:
+    """Step 9.4 on a real capture, and the honest answer to it.
+
+    With no KE-free CREATE_CHILD_SA to measure against, ``infer_pfs`` must
+    report UNAVAILABLE. The alternative -- measuring against an INFORMATIONAL
+    exchange -- produced INFERRED False at 0.65 confidence for a tunnel whose
+    ground truth is PFS *on*.
+    """
+    from analyzer.core.enums import Provenance
+    from analyzer.track_a.ike_parser import (
+        IKE_EXCHANGE_TYPE_CREATE_CHILD_SA,
+        IKE_EXCHANGE_TYPE_INFORMATIONAL,
+        exchange_sizes,
+    )
+    from analyzer.track_b.pfs import infer_pfs
+
+    (sizes,) = exchange_sizes(
+        parse_isakmp_json(
+            [
+                _sized(IKE_EXCHANGE_TYPE_CREATE_CHILD_SA, 240),
+                _sized(IKE_EXCHANGE_TYPE_INFORMATIONAL, 80),
+            ]
+        )
+    )
+
+    attribute = infer_pfs(sizes.create_child, sizes.ke_free_create_child, 19)
+
+    assert attribute.provenance is Provenance.UNAVAILABLE
+    assert attribute.value is None
+    assert (attribute.note or "").strip()
+
+
+def test_infer_pfs_still_works_given_a_genuine_baseline() -> None:
+    """The method itself is sound; only the baseline was wrong.
+
+    Given real KE-free CREATE_CHILD_SA sizes, a DH-14 rekey carrying a
+    256-byte public value is separated from one that does not -- step 9.4's
+    Done when, on the inputs the method actually calls for.
+    """
+    from analyzer.core.enums import Provenance
+    from analyzer.track_b.pfs import infer_pfs
+
+    ke_free = (240, 240, 240)
+    with_ke = tuple(size + 264 for size in ke_free)
+
+    on = infer_pfs(with_ke, ke_free, 14)
+    off = infer_pfs(ke_free, ke_free, 14)
+
+    assert on.provenance is Provenance.INFERRED
+    assert on.value is True
+    assert off.value is False
+    assert on.confidence is not None
+    assert off.confidence is not None
+
+    ecp = infer_pfs(with_ke, ke_free, 19)
+    assert ecp.confidence is not None
+    assert ecp.confidence < on.confidence, (
+        "ECP groups add far fewer bytes, so the same delta is weaker evidence"
+    )

@@ -1,0 +1,12 @@
+{
+  "labels": [
+    "transport",
+    "tunnel"
+  ],
+  "feature_names": [
+    "max_len_over_mtu",
+    "spi_pairs_per_endpoint",
+    "cleartext_ratio",
+    "modal_len_offset"
+  ]
+}

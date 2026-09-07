@@ -491,3 +491,106 @@ def test_sieve_never_offers_a_candidate_carrying_a_key_length() -> None:
         "128" in c.encryption_alg.value or "256" in c.encryption_alg.value
         for c in cipher_family.CANDIDATES
     )
+
+
+# ===========================================================================
+# Step 9.3: rekey timing needs the whole capture, not one SA
+# ===========================================================================
+
+
+def _rekey_pair(src: str, dst: str, spi: int, start_ts: float):  # type: ignore[no-untyped-def]
+    """One generation of an SA: both directions, up at the same instant."""
+    from analyzer.ingest.flow import Flow, SAPair
+    from analyzer.ingest.reader import FlowKey
+
+    def _flow(a: str, b: str, flow_spi: int) -> Flow:
+        packets = tuple(_esp(index, start_ts + index * 0.01, a, b, flow_spi) for index in range(30))
+        return Flow(
+            key=FlowKey(a, b, flow_spi, "esp"),
+            packets=packets,
+            start_ts=packets[0].ts,
+            end_ts=packets[-1].ts,
+        )
+
+    return SAPair(forward=_flow(src, dst, spi), reverse=_flow(dst, src, spi + 1), paired=True)
+
+
+def _esp(index: int, ts: float, src: str, dst: str, spi: int):  # type: ignore[no-untyped-def]
+    from analyzer.ingest.reader import PacketRecord
+
+    return PacketRecord(
+        index=index,
+        ts=ts,
+        ip_version=4,
+        src=src,
+        dst=dst,
+        proto="esp",
+        spi=spi,
+        seq=index,
+        ip_payload_len=108,
+        esp_payload_len=100,
+        captured_len=128,
+        orig_len=128,
+    )
+
+
+def test_spi_series_groups_generations_by_direction() -> None:
+    """Three generations of one tunnel, 290 seconds apart."""
+    pairs = [
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=100, start_ts=0.0),
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=200, start_ts=290.0),
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=300, start_ts=580.0),
+    ]
+
+    series = replay.spi_series(pairs)
+
+    assert len(series) == 2, "one entry per direction"
+    for entries in series.values():
+        assert [round(ts) for _, ts in entries] == [0, 290, 580]
+
+
+def test_rekey_interval_is_measured_across_generations() -> None:
+    """The bug this pins put an INFERRED rekey interval of 0 seconds, at 0.95
+    confidence, into every assessment.
+
+    A rekey installs a new SPI, which ingest groups into a *separate* SAPair,
+    so successive generations are invisible from inside any single pair. The
+    old caller built the series from one pair's forward and reverse SPIs --
+    which belong to the same generation and come up together -- so every
+    measured interval was the gap between two directions of one SA, i.e. zero.
+    """
+    pairs = [
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=100, start_ts=0.0),
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=200, start_ts=290.0),
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=300, start_ts=580.0),
+    ]
+    series = replay.spi_series(pairs)
+
+    for entries in series.values():
+        assert replay.observed_rekey_s(entries).value == 290
+
+
+def test_one_pairs_two_directions_are_not_a_rekey() -> None:
+    """Both directions of one SA come up together, so a series built from them
+    measures nothing. Kept explicit because the wrong answer it produces -- 0 --
+    is a plausible-looking number rather than an obvious error."""
+    pair = _rekey_pair("10.0.0.1", "10.0.0.2", spi=100, start_ts=0.0)
+
+    series = replay.spi_series([pair])
+
+    for entries in series.values():
+        assert len(entries) == 1, "a single generation offers no interval to measure"
+        assert replay.observed_rekey_s(entries).provenance is Provenance.UNAVAILABLE
+
+
+def test_separate_tunnels_do_not_share_a_rekey_series() -> None:
+    """Two tunnels between different endpoints are two series, not one."""
+    pairs = [
+        _rekey_pair("10.0.0.1", "10.0.0.2", spi=100, start_ts=0.0),
+        _rekey_pair("10.9.9.1", "10.9.9.2", spi=500, start_ts=5.0),
+    ]
+
+    series = replay.spi_series(pairs)
+
+    assert len(series) == 4, "two directions each, kept apart"
+    assert all(len(entries) == 1 for entries in series.values())

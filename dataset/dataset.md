@@ -5,11 +5,10 @@ row is a real tunnel between two containers, captured on the bridge they
 share, with ground truth recorded from the configuration that built it rather
 than from anything a parser inferred afterwards.
 
-**Status: the generation runs have not been performed.** The schema, the
-generator and the verification harness all exist and are tested; steps 8.1 and
-8.3 need a Docker daemon and a kernel with XFRM, which were not available in
-the environment this was built in. See [CHANGELOG.md](../CHANGELOG.md) under
-Phase 8. Nothing in this document is describing data that exists on disk today.
+**Status: generated.** See §8 for what the run produced and what it cost to
+get there — the first attempt filled half the dataset with empty captures that
+were labelled as though they held traffic, and the guard that now prevents that
+is the most important thing this document describes.
 
 ---
 
@@ -29,6 +28,12 @@ One directory per session. `<session-name>` is `SessionConfig.name`, which is
 stable for a given matrix row and seed, so a regenerated dataset overwrites
 rather than accumulating near-duplicates.
 
+Repeat runs of a configuration are suffixed `-r2`, `-r3`, `-r4`. They share the
+tunnel configuration exactly and differ only in the traffic seed, which is what
+makes "split by configuration" (step 9.5) a meaningful boundary: run 2 of a
+configuration is a different VoIP call, not a different tunnel, so allowing it
+into a different fold from run 1 would leak.
+
 ## 2. How a session is produced
 
 `backend/testbed/orchestrator.py`, in this order (LLD §10.2):
@@ -44,8 +49,10 @@ rather than accumulating near-duplicates.
 5. Generate traffic for the configured class and duration.
 6. Tear the tunnel down *inside* the capture window, so the IKE DELETE
    exchange is recorded.
-7. Stop the capture, refuse an empty one, and only then write the output
-   directory.
+7. Stop the capture, and **refuse it unless it carries real ESP traffic** —
+   not merely unless it is empty. A tunnel that negotiated successfully and
+   then carried nothing produces a capture of eight to eleven IKE packets,
+   which is not empty and is not a session. See §8.
 
 ## 3. `labels.json`
 
@@ -79,9 +86,17 @@ Two consequences worth stating plainly:
 
 `backend/testbed/matrix.yaml`, sampled by `backend/testbed/sampler.py` with a
 fixed seed. Nine dimensions; the sampler produces 60 configurations covering
-all 257 pairs from a cross-product of 3360. Re-running with the same seed
-produces an identical list, which is what makes the resume manifest and this
-dataset reproducible.
+all 257 pairs from a cross-product of 3360, plus the two named reference
+tunnels of PRD §16 — 62 in total. Re-running with the same seed produces an
+identical list, which is what makes the resume manifest and this dataset
+reproducible.
+
+`--repeats 4` expands those to 248 sessions, which is how PRD §9.3's target of
+at least 200 is met. Each repeat reseeds the traffic generators, and every
+generator draws its within-class parameters from that seed — ICMP its rate and
+sizes, VoIP its packetisation interval, video its resolution and bitrate, and
+so on. Without that the repeats would be byte-identical copies and the dataset
+would count to 248 while knowing 62 things.
 
 ## 5. Verification
 
@@ -121,7 +136,88 @@ The external dataset used for cross-validation (ISCXVPN2016, step 8.5) is
 **not** redistributed here and carries its own terms — obtain it from the
 University of New Brunswick directly.
 
-## 8. DVC
+## 8. What the generation run produced
+
+Generated 2026-09-07 by six concurrent shards (`--repeats 4 --duration 90
+--shard I/6`), 14 GB on disk.
+
+| | |
+|---|---|
+| Sessions | **248** — 62 configurations x 4 traffic runs. PRD §9.3 asks for at least 200 |
+| Failures | **0** |
+| Wall clock | ~1435-1640s per shard, six in parallel |
+| Track A vs ground truth | **PASS** — 1072 match, 664 honest_gap, 744 inferred, 248 not_reported, **0 mismatch, 0 fabricated** |
+
+`fabricated` — a value reported where ground truth says the field is
+unobservable — is the outcome that would matter most, and there are none. The
+248 `not_reported` are one per session and all the same field, `pfs_enabled`:
+Track A alone cannot determine PFS, and no dataset session rekeys inside its
+own capture for Track B to measure it from either. See CHANGELOG.md.
+
+Balanced by construction, because the sampler is pairwise over the matrix
+rather than random:
+
+| Dimension | Split |
+|---|---|
+| IP version | v4 124 / v6 124 |
+| Operating mode | transport 124 / tunnel 124 |
+| IKE | ikev1-aggressive 84 / ikev1-main 80 / ikev2 84 |
+
+| Traffic class | Sessions | Scorable 10s windows per session |
+|---|---|---|
+| email | 32 | ~14-19 |
+| file_transfer | 48 | ~18 |
+| icmp | 28 | ~18-19 |
+| **messaging** | 32 | **0 — see below** |
+| video | 32 | ~18 |
+| voip | 36 | ~18 |
+| web | 40 | ~19 |
+
+### `messaging` contributes no training rows
+
+At roughly one packet per second, a 10-second window holds seven to ten
+packets. LLD §7.6 scores a window only above twenty, so **every messaging
+window is discarded** and the class reaches neither training nor test. The
+sessions are on disk and are real; they are simply unscoreable under the
+windowing the LLD specifies, and a longer session does not help because this is
+a rate and not a duration.
+
+The consequence is that the traffic classifier is a six-class model. It is
+reported as one — `models/metrics.json` carries a `classes_absent` block and
+the model card opens by saying so — because a macro-F1 averaged over six
+classes is not comparable to a seven-class target: six handled perfectly
+averages 0.857, which clears PRD §8.4's 0.85 threshold with a seventh of the
+problem never attempted.
+
+This was **not** resolved by raising the messaging packet rate until the
+windows cleared the floor. That would meet a target by changing the data. See
+CHANGELOG.md for the two defensible resolutions, both of which are decisions
+about the specification rather than the code.
+
+### The failure this dataset nearly shipped with
+
+The first attempt produced 19 sessions of which 6 were empty. Every IPv6 row
+brought its tunnel up, generated no traffic at all, and was written with a
+`labels.json` claiming 180 seconds of its class — because every traffic
+generator built IPv4-only command lines and `run_for` wraps each one in
+`|| true`, so a command that failed instantly looked exactly like one that
+worked.
+
+Two things came out of that, and both matter more than the counts above:
+
+1. **`run_session` now refuses a session whose capture carries almost no ESP.**
+   The floor is `max(20, duration_s // 4)`, which the sparsest class in the
+   matrix clears at every duration and which a tunnel carrying only its own
+   negotiation cannot clear at any.
+2. **`tests/test_testbed_traffic.py` asserts the command lines** — no listener
+   binds `0.0.0.0`, no IPv6 literal appears unbracketed in a URL — for every
+   traffic class, in both address families.
+
+A capture labelled as traffic it does not contain is worse than a failed
+session. It is training data that teaches a classifier the wrong thing, and
+nothing downstream can tell.
+
+## 9. DVC
 
 The captures are tracked with DVC rather than git: a full run is several GB of
 PCAP, which does not belong in git history.

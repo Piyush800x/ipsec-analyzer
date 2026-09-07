@@ -41,6 +41,7 @@ And two are failures:
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -54,6 +55,8 @@ ParseCallable = Callable[[Path], list[SecurityAssociation]]
 """How the batch verifier reaches Track A. Injected rather than imported so
 the harness is testable without tshark, and so a Track A change cannot
 silently alter what "verified" means here."""
+
+log = logging.getLogger(__name__)
 
 LABELS_NAME = "labels.json"
 PCAP_NAME = "capture.pcap"
@@ -208,9 +211,19 @@ def verify_session(labels: dict[str, Any], sa: SecurityAssociation) -> SessionRe
 
 
 def verify_batch(batch_dir: Path, *, parse: ParseCallable) -> BatchReport:
-    """Verify every session directory under *batch_dir*."""
+    """Verify every session directory under *batch_dir*.
+
+    Progress is logged per session because this is not a quick check: every
+    session costs a full ``read_packets`` pass plus a tshark subprocess, and a
+    248-session dataset holds captures of a few hundred megabytes. Without it
+    the run is a black box for the better part of an hour, and there is no way
+    to tell a slow verification from a stuck one.
+    """
     report = BatchReport()
-    for session_dir in sorted(p for p in batch_dir.iterdir() if p.is_dir()):
+    sessions = sorted(p for p in batch_dir.iterdir() if p.is_dir())
+    log.info("verifying %d sessions under %s", len(sessions), batch_dir)
+    for index, session_dir in enumerate(sessions, start=1):
+        log.info("[%d/%d] %s", index, len(sessions), session_dir.name)
         labels_path = session_dir / LABELS_NAME
         pcap_path = session_dir / PCAP_NAME
         if not labels_path.exists() or not pcap_path.exists():
@@ -252,7 +265,14 @@ def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("batch_dir", type=Path)
     parser.add_argument("--tshark", default="tshark", help="tshark binary to use")
+    parser.add_argument("--quiet", "-q", action="store_true", help="suppress per-session progress")
     args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(message)s",
+        stream=sys.stderr,
+    )
 
     def parse(pcap: Path) -> list[SecurityAssociation]:
         pairs = assemble_flows(read_packets(pcap).packets)

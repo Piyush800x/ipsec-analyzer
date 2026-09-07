@@ -12,6 +12,7 @@ import pytest
 from analyzer.core.enums import OperatingMode, TrafficClass
 from testbed.config import (
     HARDENED_REFERENCE,
+    REKEY_WINDOW_S,
     WEAK_REFERENCE,
     EspSuite,
     IkeFlavour,
@@ -118,7 +119,36 @@ class TestDeterminismControls:
 
     def test_lifetime_is_rendered_on_both_the_ike_sa_and_the_child(self) -> None:
         cfg = HARDENED_REFERENCE.model_copy(update={"lifetime_s": 300})
-        assert render_swanctl_conf(cfg, "left").count("rekey_time = 300s") == 2
+        rendered = render_swanctl_conf(cfg, "left")
+
+        # `lifetime_s` is the *hard* lifetime -- the value IKEv1 puts on the
+        # wire and the one labels.json claims. strongSwan derives that as
+        # rekey_time + over_time, so the rendered rekey time is the configured
+        # lifetime minus the window.
+        assert rendered.count(f"rekey_time = {300 - REKEY_WINDOW_S}s") == 2
+        assert f"over_time = {REKEY_WINDOW_S}s" in rendered
+
+    def test_the_rekey_window_is_never_zero(self) -> None:
+        """strongSwan *deletes* an SA that has not rekeyed within
+        ``rekey_time + over_time``.
+
+        With no window the SA hard-expires at the instant it tries to rekey. A
+        300-second tunnel captured for 700 seconds died at t=300 with the rekey
+        exchange on the wire and nothing after it, which is how this was found.
+        """
+        assert REKEY_WINDOW_S > 0
+        assert f"over_time = {REKEY_WINDOW_S}s" in render_swanctl_conf(HARDENED_REFERENCE, "left")
+
+    def test_the_negotiated_lifetime_matches_what_is_configured(self) -> None:
+        """rekey_time + over_time is what goes on the IKEv1 wire, and
+        `labels.json` states it as `negotiated_lifetime_s`. If those two ever
+        drift apart, every label disagrees with every capture -- which is
+        exactly what a default over_time did (95040s for a configured 86400s).
+        """
+        cfg = HARDENED_REFERENCE.model_copy(update={"lifetime_s": 3600})
+
+        assert cfg.rekey_time_s + cfg.over_time_s == cfg.lifetime_s
+        assert cfg.to_ground_truth()["expected"]["negotiated_lifetime_s"] == cfg.lifetime_s
 
     def test_keyingtries_is_one(self) -> None:
         """A configuration that cannot negotiate must fail while the

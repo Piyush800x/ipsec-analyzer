@@ -25,8 +25,14 @@ async def _noop() -> None:
     """Stands in for preflight, which needs a Docker daemon."""
 
 
-async def _no_orphans() -> tuple[int, int]:
-    """Stands in for prune_orphans, which needs a Docker daemon."""
+async def _no_orphans(session: str | None = None) -> tuple[int, int]:
+    """Stands in for prune_orphans, which needs a Docker daemon.
+
+    Takes *session* because the real one does: a batch cleaning up after a
+    failure names the session it is cleaning up after, so that a concurrent
+    shard's live containers are not swept away with it.
+    """
+    del session
     return 0, 0
 
 
