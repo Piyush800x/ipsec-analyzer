@@ -16,6 +16,16 @@
 *.onnx    binary
 *.pt      binary
 
+# Trained model artefacts. Marked binary rather than left to `text=auto` because
+# `Assessment.model_versions` is a SHA-256 of the file's own bytes: any
+# line-ending normalisation would give a Windows checkout and a Linux checkout
+# different version strings for the same model. `eol=lf` would already make them
+# agree, but a file whose bytes are hashed should not be subject to a
+# transformation at all.
+backend/models/*.txt       binary
+backend/models/*.meta.json binary
+backend/models/calibration.json binary
+
 # Lockfiles: LF, and collapse them in diffs
 uv.lock           linguist-generated=true
 package-lock.json linguist-generated=true

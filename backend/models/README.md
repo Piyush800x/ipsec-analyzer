@@ -1,6 +1,19 @@
 # Trained model artefacts
 
-DVC-tracked, not git-tracked.
+**Committed to git, not DVC.** All 3.3 MB of what inference loads is in the
+repository, so a clone works immediately: `uv sync && uv run uvicorn ...` gives
+you a running analyser with Track B's classifiers live, no training and no
+14 GB dataset required.
+
+DVC is the right home for model weights and this project's docs describe it as
+such, but no DVC remote is configured. Ignoring the artefacts on that basis
+would mean every teammate's checkout silently loses Track B to `UNAVAILABLE`
+with no way to recover it short of regenerating the dataset. A few megabytes in
+git beats a broken checkout.
+
+`traffic_cnn.pt` is the exception and stays out: inference loads LightGBM, not
+the CNN (see below), so the checkpoint is a training artefact no deployment
+reads. Retrain to reproduce it.
 
 Each artefact ships with the version string reported in
 `Assessment.model_versions`, so an assessment can always be traced back to the

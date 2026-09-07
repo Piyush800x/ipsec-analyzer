@@ -50,10 +50,18 @@ backend/models/*.pkl
 backend/models/*.joblib
 backend/models/*.onnx
 backend/models/*.pt
-# LightGBM writes its boosters as text, which git would happily swallow.
-backend/models/*.txt
-backend/models/*.meta.json
-backend/models/calibration.json
+# The artefacts inference loads are committed, all 3.3 MB of them: the
+# LightGBM traffic and mode classifiers, their feature/label order, and the
+# isotonic calibration knots. DVC would be the right home for model weights
+# and this project documents it as such -- but no DVC remote is configured, so
+# ignoring them means a teammate's clone has no models, cannot train without
+# the 14 GB dataset that is also not in git, and silently loses every Track B
+# inference to UNAVAILABLE. A few megabytes in git beats a broken checkout.
+#
+# `traffic_cnn.pt` stays out: inference deliberately loads LightGBM rather than
+# the CNN so that torch is not a runtime dependency (see models/README.md), so
+# the checkpoint is a training artefact that no deployment reads.
+backend/models/*.pt
 
 # The batch logs of a generation run. Several megabytes of per-session INFO
 # lines whose useful content is already summarised in CHANGELOG.md.
