@@ -54,8 +54,10 @@ component no comparable tool reports.
 
 ## Current status
 
-Gate **G3 — End to end**. A capture goes in one end and an assessment with
-both report formats comes out the other, through the dashboard.
+Gate **G4 — Feature complete**. Both tracks run, both report formats generate,
+the degradation suite passes, and the PRD §16 demo has been rehearsed
+end to end on the air-gapped stack — three consecutive clean runs at 21 seconds
+against a two-minute target.
 
 | Module | State |
 |---|---|
@@ -64,40 +66,77 @@ both report formats comes out the other, through the dashboard.
 | M1 Testbed | **Done** — builds real tunnels; needs Docker to run |
 | M2 Ingest | **Done** — pcap reader, flow assembly, capture quality |
 | M3 Track A | **Done** — IKE parsing, correlation, `SecurityAssociation` |
-| M4 Track B | **Partial** — the deterministic half; no models trained |
+| M4 Track B | **Done** — sieve, replay, PFS, and both trained models |
 | M5 Assessment | **Done** — 14-rule policy, scoring, threat matrix |
 | M6 Presentation | **Done** — dashboard, both PDF report formats |
-| Dataset generation | **Blocked** — needs Docker; harness and docs exist |
+| Dataset | **Done** — 248 labelled sessions, 0 failures |
 
-**What is honestly not finished.** No machine-learning model has been trained,
-because that needs the labelled dataset from Phase 8, which needs a Docker
-daemon this was built without. Every field that would depend on a model reports
-*unavailable with a reason* rather than a guess — which is the same thing the
-product does for an analyst on a degraded capture, so the seam is real rather
-than a placeholder. The traffic classifier, the mode classifier, calibration
-and the external validation in PRD §8.4 are therefore unmeasured, not missed.
+**The models, and how to read their scores.**
 
-The other standing gap is that `tshark`'s JSON field names have never been
-checked against a real binary (see `manualtesting.md` MT-16). Track A's parsing
-logic is tested; what it calls things is not.
+| Model | Metric | Result | Target | |
+|---|---|---|---|---|
+| ML-1 traffic class (LightGBM) | macro-F1 | 1.0000 | — | baseline |
+| ML-1 traffic class (CNN) | macro-F1 | 1.0000 | ≥0.85 (PRD §8.4) | met |
+| ML-1 traffic class (CNN) | ECE | 0.0024 | ≤0.10 (PRD §8.4) | met |
+| ML-2 operating mode | accuracy | 1.0000 | ≥0.90 (step 9.9) | met |
+
+**Those numbers are a reason to be suspicious, not to be pleased, and
+[docs/model-card.md](docs/model-card.md) says so at length rather than in a
+footnote.** Leakage was ruled out directly — train, calibration and test hold
+disjoint sets of *configurations*, asserted on the real split. What is left is
+that the task as posed is nearly separable: seven traffic classes produced by
+different tools at rates differing by orders of magnitude, and a mode
+classifier whose strongest feature is close to a direct measurement of the
+inner IP header. The scores measure **how distinct this testbed's generators
+are**. They are not evidence of generalisation to real traffic.
+
+**What is honestly not finished.**
+
+- **External validation (step 9.12) is unmeasured.** ISCXVPN2016 needs a
+  registration form and several gigabytes and has not been downloaded. The
+  adapter and the evaluation are implemented and tested against synthetic
+  captures shaped like that corpus, so it is one command away for anyone with
+  the data — but until it runs, this project has *no evidence its models
+  generalise beyond its own testbed*.
+- **The demonstration video (step 11.8) has not been recorded.**
+  [docs/demo-script.md](docs/demo-script.md) is the shot list and narration.
+- **Two manual checks need a Neon connection string** (MT-08, MT-09) and are
+  the only rows in [manualtesting.md](manualtesting.md) still unrun.
 
 See [CHANGELOG.md](CHANGELOG.md) for exactly what landed and what did not, and
 [manualtesting.md](manualtesting.md) for what has been confirmed by hand.
 
 ## Try it
 
+The air-gapped stack is the one to use — it is what the demo runs on, it needs
+no database server, and its backing network has no route off the machine:
+
 ```bash
-# offline, no database server, no models needed
+docker compose -f docker-compose.offline.yml up -d --build
+```
+
+Open <http://localhost:3000> and upload one of the two prepared captures in
+[dataset/demo/](dataset/demo/): `demo-tunnel-a` is deliberately weak (IKEv1
+aggressive, 3DES, DH-2, no PFS) and `demo-tunnel-b` is hardened (IKEv2,
+AES-256-GCM, DH-19, PFS). They score 25 and 80.
+
+To check the whole path without clicking:
+
+```bash
+python scripts/demo_rehearsal.py --runs 3
+```
+
+For development, without Docker:
+
+```bash
 cd backend && uv sync --all-groups && uv run alembic upgrade head
 uv run uvicorn analyzer.api.main:create_app --factory --port 8000 &
 
-cd ../frontend && npm ci && USE_FIXTURES=1 npm run dev
+cd ../frontend && npm ci && npm run dev
 ```
 
-Open <http://localhost:3000>. With `USE_FIXTURES=1` the dashboard renders the
-two demo assessments with the backend switched off entirely, which is the
-fastest way to see what the product claims. Drop the flag and upload a PCAP to
-run the real pipeline.
+`USE_FIXTURES=1 npm run dev` renders the two demo assessments with the backend
+switched off entirely, which is the fastest way to see what the product claims.
 
 Both PDF reports:
 
@@ -119,7 +158,7 @@ cd ipsec-analyzer
 
 cp .env.example .env          # then set DATABASE_URL — see startup.md §3
 cd backend && mkdir -p data && uv sync --all-groups && uv run alembic upgrade head
-uv run pytest                 # expect 508 passed, 68 skipped
+uv run pytest                 # expect 675 passed, 62 skipped
 ```
 
 `--all-groups`, not a bare `uv sync`: the optional groups carry the testbed,
@@ -152,13 +191,18 @@ ipsec-analyzer/
 │   ├── testbed/          M1 — tunnel orchestration, traffic generation
 │   └── tests/            including the two demo fixtures
 ├── frontend/             Next.js 16, App Router, TypeScript, Tailwind
-├── dataset/              labelled captures (Phase 8, DVC-tracked)
-├── docs/                 the specifications
-└── scripts/              ci-local.sh, pg-dev.sh
+│   └── models/           the trained Track B artefacts, committed
+├── dataset/
+│   ├── sessions/         248 labelled captures (Phase 8, DVC-tracked)
+│   └── demo/             the two frozen PRD §16 captures (step 11.5)
+├── docs/                 the specifications, plus the model card and demo script
+└── scripts/              ci-local.sh, pg-dev.sh, demo_rehearsal.py
 ```
 
-Every module above is implemented. `backend/models/` is empty, and honestly so
-— see [its README](backend/models/README.md).
+Every module above is implemented, and `backend/models/` carries the trained
+artefacts — 3.7 MB, committed, so a clean clone has working inference. What
+each one scored and on what is in [docs/model-card.md](docs/model-card.md),
+generated from `models/metrics.json` rather than written by hand.
 
 ---
 

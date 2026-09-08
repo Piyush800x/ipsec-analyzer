@@ -1,0 +1,417 @@
+{
+  "labels": [
+    "email",
+    "file_transfer",
+    "icmp",
+    "messaging",
+    "video",
+    "voip",
+    "web"
+  ],
+  "n_features": 74,
+  "windows": {
+    "train": 2888,
+    "calibration": 652,
+    "test": 934
+  },
+  "configurations": {
+    "train": 40,
+    "calibration": 9,
+    "test": 13
+  },
+  "sessions_total": 248,
+  "classes_absent": {},
+  "training_feature_means": {
+    "esp_len_mean": 708.2899780273438,
+    "esp_len_std": 336.392578125,
+    "esp_len_min": 133.23684692382812,
+    "esp_len_max": 1012.0,
+    "esp_len_p10": 295.1565246582031,
+    "esp_len_p25": 420.77838134765625,
+    "esp_len_p50": 884.8628540039062,
+    "esp_len_p75": 943.0387573242188,
+    "esp_len_p90": 980.9764404296875,
+    "esp_len_p99": 1010.00830078125,
+    "esp_len_mod16_0": 0.3514764606952667,
+    "esp_len_mod16_1": 0.0,
+    "esp_len_mod16_2": 0.0,
+    "esp_len_mod16_3": 0.0,
+    "esp_len_mod16_4": 0.16610018908977509,
+    "esp_len_mod16_5": 0.0,
+    "esp_len_mod16_6": 0.0,
+    "esp_len_mod16_7": 0.0,
+    "esp_len_mod16_8": 0.08290533721446991,
+    "esp_len_mod16_9": 0.0,
+    "esp_len_mod16_10": 0.0,
+    "esp_len_mod16_11": 0.0,
+    "esp_len_mod16_12": 0.39951804280281067,
+    "esp_len_mod16_13": 0.0,
+    "esp_len_mod16_14": 0.0,
+    "esp_len_mod16_15": 0.0,
+    "esp_len_distinct": 26.323753356933594,
+    "esp_len_modal": 912.0055541992188,
+    "esp_len_modal_share": 0.6745408773422241,
+    "packet_count": 5640.6435546875,
+    "byte_count": 6136900.0,
+    "duration_s": 8.606186866760254,
+    "packets_per_s": 1068.4501953125,
+    "bytes_per_s": 1018143.8125,
+    "iat_mean": 0.04061039164662361,
+    "iat_std": 0.10420595109462738,
+    "iat_min": 1.9994880858575925e-05,
+    "iat_max": 0.9964798092842102,
+    "iat_p10": 3.513190313242376e-05,
+    "iat_p25": 4.4250173232285306e-05,
+    "iat_p50": 0.0018073775572702289,
+    "iat_p75": 0.04978325590491295,
+    "iat_p90": 0.10391945391893387,
+    "iat_p99": 0.23244719207286835,
+    "iat_cv": 8.523221969604492,
+    "burst_count": 5.937673091888428,
+    "idle_total_s": 3.4035093784332275,
+    "idle_mean_s": 0.7338507771492004,
+    "up_packets": 4170.841796875,
+    "down_packets": 1469.8016357421875,
+    "up_down_byte_ratio": 940.4177856445312,
+    "up_down_packet_ratio": 95.36851501464844,
+    "up_len_mean": 676.8580932617188,
+    "up_len_std": 145.5647735595703,
+    "up_len_min": 205.37950134277344,
+    "up_len_max": 805.0664672851562,
+    "up_len_p10": 500.1717529296875,
+    "up_len_p25": 638.6329345703125,
+    "up_len_p50": 709.6094360351562,
+    "up_len_p75": 746.919677734375,
+    "up_len_p90": 785.6551513671875,
+    "up_len_p99": 804.1897583007812,
+    "down_len_mean": 401.34222412109375,
+    "down_len_std": 86.81216430664062,
+    "down_len_min": 139.72991943359375,
+    "down_len_max": 465.6925354003906,
+    "down_len_p10": 356.66619873046875,
+    "down_len_p25": 401.3891906738281,
+    "down_len_p50": 420.5484619140625,
+    "down_len_p75": 439.4986267089844,
+    "down_len_p90": 448.8753356933594,
+    "down_len_p99": 459.06646728515625,
+    "sa_spi_count": 2.0,
+    "sa_paired": 1.0
+  },
+  "lightgbm": {
+    "test": {
+      "macro_f1": 1.0,
+      "accuracy": 1.0,
+      "per_class_f1": {
+        "email": 1.0,
+        "file_transfer": 1.0,
+        "icmp": 1.0,
+        "messaging": 1.0,
+        "video": 1.0,
+        "voip": 1.0,
+        "web": 1.0
+      },
+      "support": {
+        "email": 140,
+        "file_transfer": 144,
+        "icmp": 73,
+        "messaging": 137,
+        "video": 144,
+        "voip": 144,
+        "web": 152
+      },
+      "confusion": [
+        [
+          140,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          144,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          73,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          137,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          144,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          144,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          152
+        ]
+      ],
+      "labels": [
+        "email",
+        "file_transfer",
+        "icmp",
+        "messaging",
+        "video",
+        "voip",
+        "web"
+      ]
+    },
+    "ece_uncalibrated": 0.00010524283803792223,
+    "ece_calibrated": 6.272418931185797e-05,
+    "calibration_fold_ece_before": 2.8219281128727403e-05,
+    "calibration_fold_ece_after": 0.0
+  },
+  "cnn": {
+    "test": {
+      "macro_f1": 1.0,
+      "accuracy": 1.0,
+      "per_class_f1": {
+        "email": 1.0,
+        "file_transfer": 1.0,
+        "icmp": 1.0,
+        "messaging": 1.0,
+        "video": 1.0,
+        "voip": 1.0,
+        "web": 1.0
+      },
+      "support": {
+        "email": 140,
+        "file_transfer": 144,
+        "icmp": 73,
+        "messaging": 137,
+        "video": 144,
+        "voip": 144,
+        "web": 152
+      },
+      "confusion": [
+        [
+          140,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          144,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          73,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          137,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          144,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          144,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          152
+        ]
+      ],
+      "labels": [
+        "email",
+        "file_transfer",
+        "icmp",
+        "messaging",
+        "video",
+        "voip",
+        "web"
+      ]
+    },
+    "temperature": 1.0,
+    "ece_uncalibrated": 0.0023620093163836714,
+    "ece_calibrated": 0.0023620093163836714,
+    "calibration_fold_ece_before": 0.0012600952854378087,
+    "calibration_fold_ece_after": 0.0012600952854378087
+  },
+  "reliability": [
+    {
+      "bin_lower": 0.0,
+      "bin_upper": 0.1,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.1,
+      "bin_upper": 0.2,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.2,
+      "bin_upper": 0.30000000000000004,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.30000000000000004,
+      "bin_upper": 0.4,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.4,
+      "bin_upper": 0.5,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.5,
+      "bin_upper": 0.6000000000000001,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.6000000000000001,
+      "bin_upper": 0.7000000000000001,
+      "count": 0,
+      "mean_confidence": 0.0,
+      "accuracy": 0.0
+    },
+    {
+      "bin_lower": 0.7000000000000001,
+      "bin_upper": 0.8,
+      "count": 1,
+      "mean_confidence": 0.7939062547124708,
+      "accuracy": 1.0
+    },
+    {
+      "bin_lower": 0.8,
+      "bin_upper": 0.9,
+      "count": 2,
+      "mean_confidence": 0.8571817259832565,
+      "accuracy": 1.0
+    },
+    {
+      "bin_lower": 0.9,
+      "bin_upper": 1.0,
+      "count": 931,
+      "mean_confidence": 0.9981585538043165,
+      "accuracy": 1.0
+    }
+  ],
+  "mode": {
+    "trained": true,
+    "sessions": 248,
+    "test_sessions": 52,
+    "feature_names": [
+      "max_len_over_mtu",
+      "spi_pairs_per_endpoint",
+      "cleartext_ratio",
+      "modal_len_offset",
+      "min_len_offset",
+      "inner_header_bytes"
+    ],
+    "baseline_cells": 13,
+    "test": {
+      "macro_f1": 1.0,
+      "accuracy": 1.0,
+      "per_class_f1": {
+        "transport": 1.0,
+        "tunnel": 1.0
+      },
+      "support": {
+        "transport": 32,
+        "tunnel": 20
+      },
+      "confusion": [
+        [
+          32,
+          0
+        ],
+        [
+          0,
+          20
+        ]
+      ],
+      "labels": [
+        "transport",
+        "tunnel"
+      ]
+    }
+  }
+}

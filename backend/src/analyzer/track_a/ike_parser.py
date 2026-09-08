@@ -15,13 +15,23 @@ past that boundary (``Proposal``, ``Transform``, ``IkeNegotiation`` and the
 building of one from the other) works on the plain IR in this module and is
 independent of tshark's JSON shape.
 
-**This adapter has not been run against a real tshark binary.** No Docker and
-no tshark were available where Phase 4 was implemented (see CHANGELOG.md).
-Its field-name assumptions are the best available from documented, long-
-stable ``isakmp.*`` display-filter names, deliberately read defensively
-(multiple candidate keys, tolerant integer parsing) rather than assumed
-exact -- but LLD section 6.1's warning applies at full strength until someone
-runs this against a real capture and fixes what tshark actually calls things.
+**This adapter has now been run against the pinned tshark (4.4.18) on real
+strongSwan captures, and most of what it assumed was wrong.** Phase 4 was
+written without Docker or tshark and guessed the field names from documented
+``isakmp.*`` display-filter names; every one of the structural guesses missed.
+tshark does not expose ``isakmp.sa.proposals``/``isakmp.tf`` container keys at
+all -- it nests payloads as repeated ``isakmp.typepayload`` /
+``isakmp.typepayload_tree`` pairs -- IKEv1 attributes live under
+``isakmp.ike.attr`` rather than ``isakmp.tf.attr``, IKEv2 spells the transform
+ID once per transform type (``isakmp.tf.id.encr`` and friends), and
+``isakmp.version`` is the packed byte ``0x20`` rather than a major version.
+The result was a parser that ran cleanly and observed *nothing*: every
+capture came back "no IKE negotiation correlates to this SA".
+
+The names below are now read off real output rather than inferred, and
+``tests/test_track_a_ike_parser.py`` fixtures are captured from that same
+output. LLD section 6.1's warning still applies to the *next* tshark version:
+this is an adapter to one program's JSON, and it is pinned for that reason.
 """
 
 from __future__ import annotations
@@ -56,6 +66,7 @@ from analyzer.track_a.transforms import (
     TRANSFORM_TYPE_ESN,
     TRANSFORM_TYPE_INTEG,
     TRANSFORM_TYPE_PRF,
+    fixed_key_length_bits,
     ikev1_auth_method,
     ikev1_encryption_alg,
     ikev1_hash_alg,
@@ -71,9 +82,61 @@ IKE_EXCHANGE_TYPE_MAIN: Final = 2
 IKE_EXCHANGE_TYPE_AGGRESSIVE: Final = 4
 """IKEv1 Phase 1 exchange types, RFC 2408 section 3.1. Step 4.3."""
 
-NOTIFY_NAT_DETECTION_SOURCE_IP: Final = 16406
-NOTIFY_NAT_DETECTION_DESTINATION_IP: Final = 16407
-"""RFC 3947 NAT-Traversal notify message types. Step 4.7."""
+IKE_EXCHANGE_TYPE_CREATE_CHILD_SA: Final = 36
+IKE_EXCHANGE_TYPE_INFORMATIONAL: Final = 37
+"""RFC 7296 section 1.2-1.4 exchange types.
+
+Step 9.4 measures how much larger a CREATE_CHILD_SA carrying a KE payload is
+than one that does not. An INFORMATIONAL exchange looks like the nearest
+available stand-in for the second and **is not one** -- see
+``ExchangeSizes.informational``."""
+
+NOTIFY_NAT_DETECTION_SOURCE_IP: Final = 16388
+NOTIFY_NAT_DETECTION_DESTINATION_IP: Final = 16389
+"""RFC 7296 section 3.10.1 NAT detection notify types, confirmed as 16388 on a
+real IKE_SA_INIT. Step 4.7. Phase 4 had 16406/16407 here, which are not the
+NAT-detection types in either RFC and matched nothing."""
+
+PAYLOAD_TYPE_KEY: Final = "isakmp.typepayload"
+PAYLOAD_TREE_KEY: Final = "isakmp.typepayload_tree"
+"""How tshark renders the ISAKMP payload chain, and the single most important
+fact about its JSON: a payload is *two* sibling keys, not one object. The type
+number lands in ``isakmp.typepayload`` and the payload's contents in
+``isakmp.typepayload_tree``, both repeated once per payload and aligned by
+position. Nesting uses the same pair recursively, so a transform is reached as
+SA -> proposal -> transform through three levels of it.
+
+``--no-duplicate-keys`` turns the repetitions into JSON arrays. Without it they
+collapse to whichever payload tshark emitted last, which for an IKE_SA_INIT is
+a vendor ID rather than the SA payload."""
+
+PAYLOAD_IKEV1_SA: Final = 1
+PAYLOAD_PROPOSAL: Final = 2
+PAYLOAD_TRANSFORM: Final = 3
+PAYLOAD_IKEV1_NAT_D: Final = 20
+PAYLOAD_IKEV1_NOTIFY: Final = 11
+PAYLOAD_IKEV2_SA: Final = 33
+PAYLOAD_IKEV2_NOTIFY: Final = 41
+"""ISAKMP payload type numbers (RFC 2408 section 3.1, RFC 7296 section 3.2).
+Proposal and Transform keep the same numbers in both versions; SA and Notify
+do not."""
+
+SA_PAYLOAD_TYPES: Final = frozenset({PAYLOAD_IKEV1_SA, PAYLOAD_IKEV2_SA})
+NOTIFY_PAYLOAD_TYPES: Final = frozenset({PAYLOAD_IKEV1_NOTIFY, PAYLOAD_IKEV2_NOTIFY})
+
+IKEV1_ATTR_CONTAINER: Final = "isakmp.ike.attr"
+IKEV2_ATTR_CONTAINER: Final = "isakmp.ike2.attr"
+"""Transform attributes. The two IKE versions get different key names from
+tshark even where the encoding is identical, so neither can stand in for the
+other. Phase 4 assumed a single ``isakmp.tf.attr`` for both; that key does not
+exist."""
+
+IKEV1_NO_TRANSFORM_TYPE: Final = -1
+"""IKEv1 transforms have no transform *type*: one transform payload carries a
+whole candidate suite and every algorithm in it is an attribute. A sentinel
+rather than a borrowed number, so that ``Proposal.transform()`` -- which asks
+an IKEv2-shaped question -- can never match an IKEv1 transform and read it
+under the wrong version's rules."""
 
 
 class TrackAError(RuntimeError):
@@ -137,6 +200,13 @@ class IsakmpMessage:
     resp_spi: str
     sa_payload: tuple[Proposal, ...] | None
     nat_detected: bool
+    length: int = 0
+    """The ISAKMP message length in bytes, from the header's own length field.
+
+    Read from ``isakmp.length`` rather than the frame length so that it measures
+    the IKE message and not the Ethernet, IP and UDP headers around it -- those
+    are constant per capture but not across captures, and step 9.4 compares
+    sizes between exchanges rather than against an absolute."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +326,15 @@ def _to_int(value: Any) -> int | None:
             return int(text, 0) if text.lower().startswith("0x") else int(text)
         except ValueError:
             pass
+        if ":" in text:
+            # Transform attribute values arrive as colon-separated octets:
+            # "00:05" for an algorithm ID, "00:01:73:40" for a lifetime. This
+            # is the raw attribute value in network byte order, so a plain
+            # big-endian read is the decode, not a heuristic.
+            try:
+                return int.from_bytes(bytes.fromhex(text.replace(":", "")), "big")
+            except ValueError:
+                return None
         if "(" in text and text.endswith(")"):
             inner = text.rsplit("(", 1)[1][:-1].strip()
             try:
@@ -278,6 +357,48 @@ def _find_first(d: dict[str, Any], *candidate_keys: str) -> Any:
     return None
 
 
+def _child_payloads(node: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """The ISAKMP payloads directly inside *node*, as ``(type, contents)``.
+
+    The two repeated keys are aligned by position, which is the only thing
+    tying a payload's type number to its contents -- tshark does not put the
+    type inside the tree. ``zip`` therefore truncates deliberately: a run
+    where the two lists disagree in length is malformed output, and pairing
+    past the shorter one would attach contents to the wrong type.
+    """
+    types = _as_list(node.get(PAYLOAD_TYPE_KEY))
+    trees = _as_list(node.get(PAYLOAD_TREE_KEY))
+    payloads = []
+    for raw_type, tree in zip(types, trees, strict=False):
+        payload_type = _to_int(raw_type)
+        if payload_type is not None and isinstance(tree, dict):
+            payloads.append((payload_type, tree))
+    return payloads
+
+
+def _payloads_of_type(node: dict[str, Any], wanted: frozenset[int] | int) -> list[dict[str, Any]]:
+    """Direct children of *node* whose payload type is in *wanted*."""
+    types = wanted if isinstance(wanted, frozenset) else frozenset({wanted})
+    return [tree for payload_type, tree in _child_payloads(node) if payload_type in types]
+
+
+def _walk_payloads(node: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """Every payload under *node*, at any depth, breadth-first.
+
+    Used where the payload's position in the chain does not matter, only that
+    it is somewhere in the message -- NAT detection being the case that
+    motivates it, since the notify can sit at any point in the chain.
+    """
+    found: list[tuple[int, dict[str, Any]]] = []
+    queue = [node]
+    while queue:
+        current = queue.pop(0)
+        children = _child_payloads(current)
+        found.extend(children)
+        queue.extend(tree for _, tree in children)
+    return found
+
+
 def _find_by_suffix(d: dict[str, Any], suffix: str) -> Any:
     """Find a value by key suffix rather than an assumed exact dotted path.
 
@@ -288,6 +409,22 @@ def _find_by_suffix(d: dict[str, Any], suffix: str) -> Any:
     """
     for key, value in d.items():
         if key.endswith(suffix):
+            return value
+    return None
+
+
+def _find_by_prefix(d: dict[str, Any], prefix: str) -> Any:
+    """Find a value by key prefix, for a field tshark names after its own
+    interpretation of the value.
+
+    An IKEv2 transform ID is ``isakmp.tf.id.encr``, ``isakmp.tf.id.prf``,
+    ``isakmp.tf.id.integ``, ``isakmp.tf.id.dh`` or ``isakmp.tf.id.esn``
+    depending on the transform type that precedes it. Matching the prefix
+    reads all five, and the older bare ``isakmp.tf.id``, without enumerating
+    a list that a new transform type would silently fall off the end of.
+    """
+    for key, value in d.items():
+        if key.startswith(prefix):
             return value
     return None
 
@@ -314,72 +451,136 @@ def _frame_index_and_ts(layers: dict[str, Any]) -> tuple[int, float]:
 
 
 def _ike_version(isakmp: dict[str, Any]) -> IkeVersion:
-    raw = _find_first(isakmp, "isakmp.version", "isakmp.majorversion")
+    """The IKE major version, from whichever of three renderings tshark used.
+
+    ``isakmp.version`` is the *packed* version byte -- ``0x20`` for IKEv2 and
+    ``0x10`` for IKEv1 -- with the nibbles split out into
+    ``isakmp.version_tree``. Reading the packed byte as an integer gives 32,
+    which is not 2, so Phase 4's version check classified every IKEv2 capture
+    as IKEv1 and then looked for IKEv1 attributes that were not there. The
+    unpacked nibble is preferred and the shift is the fallback.
+    """
+    tree = isakmp.get("isakmp.version_tree")
+    if isinstance(tree, dict):
+        major = _to_int(_find_first(tree, "isakmp.mjver"))
+        if major is not None:
+            return IkeVersion.IKEV2 if major == 2 else IkeVersion.IKEV1
+
+    spelled = _find_first(isakmp, "isakmp.majorversion")
+    if spelled is not None:
+        return IkeVersion.IKEV2 if _to_int(spelled) == 2 else IkeVersion.IKEV1
+
+    raw = isakmp.get("isakmp.version")
     if isinstance(raw, str) and "." in raw:
-        major = raw.split(".", 1)[0].strip()
-    else:
-        major = str(_to_int(raw) or 0)
-    return IkeVersion.IKEV2 if major.strip() in ("2",) else IkeVersion.IKEV1
+        return IkeVersion.IKEV2 if _to_int(raw.split(".", 1)[0]) == 2 else IkeVersion.IKEV1
+
+    packed = _to_int(raw)
+    if packed is not None:
+        return IkeVersion.IKEV2 if (packed >> 4) == 2 else IkeVersion.IKEV1
+    return IkeVersion.IKEV1
+
+
+def _spi(value: Any) -> str:
+    """An ISAKMP cookie, normalised from tshark's ``e8:e0:79:...`` octets to
+    bare lowercase hex, so an IKE SPI reads the same way ingest renders an ESP
+    SPI. Also the negotiation grouping key, which only needs consistency."""
+    return str(value or "").replace(":", "").lower()
 
 
 def _parse_attrs(attr_container: Any) -> tuple[TransformAttr, ...]:
+    """Transform attributes, from either version's container.
+
+    The suffixes are ``.attr.type`` and ``.attr.value`` rather than ``.type``
+    and ``.value`` because tshark also emits *decoded* siblings in the same
+    object -- ``isakmp.ike.attr.life_type``, ``isakmp.ike.attr.encryption_algorithm``
+    -- and a bare ``.type`` suffix matches whichever the dict happens to yield
+    first. The raw ``value`` is read rather than the decoded sibling because it
+    is present for every attribute type, including ones tshark has no name for.
+    """
     attrs = []
     for raw_attr in _as_list(attr_container):
         if not isinstance(raw_attr, dict):
             continue
-        attr_type = _to_int(_find_by_suffix(raw_attr, ".type"))
-        attr_value = _to_int(_find_by_suffix(raw_attr, ".value"))
+        attr_type = _to_int(_find_by_suffix(raw_attr, ".attr.type"))
+        attr_value = _to_int(_find_by_suffix(raw_attr, ".attr.value"))
         if attr_type is not None and attr_value is not None:
             attrs.append(TransformAttr(attr_type=attr_type, value=attr_value))
     return tuple(attrs)
 
 
-def _parse_transforms(transform_container: Any) -> tuple[Transform, ...]:
-    transforms = []
-    for raw_tf in _as_list(transform_container):
-        if not isinstance(raw_tf, dict):
-            continue
-        t_type = _to_int(_find_first(raw_tf, "isakmp.tf.type"))
-        t_id = _to_int(_find_first(raw_tf, "isakmp.tf.id"))
-        if t_type is None or t_id is None:
-            continue
-        attr_container = _find_first(raw_tf, "isakmp.tf.attr", "isakmp.tf.attrs")
-        transforms.append(
-            Transform(transform_type=t_type, transform_id=t_id, attrs=_parse_attrs(attr_container))
-        )
-    return tuple(transforms)
-
-
-def _parse_proposals(sa_payload: Any) -> tuple[Proposal, ...] | None:
-    if not isinstance(sa_payload, dict):
+def _ikev2_transform(raw_tf: dict[str, Any]) -> Transform | None:
+    """One typed IKEv2 transform: ENCR, PRF, INTEG, DH or ESN."""
+    t_type = _to_int(_find_first(raw_tf, "isakmp.tf.type"))
+    t_id = _to_int(_find_by_prefix(raw_tf, "isakmp.tf.id"))
+    if t_type is None or t_id is None:
         return None
-    proposals_container = _find_first(sa_payload, "isakmp.sa.proposals")
-    proposal_container = (
-        _find_first(proposals_container, "isakmp.sa.proposal")
-        if isinstance(proposals_container, dict)
-        else proposals_container
-    )
+    attrs = _parse_attrs(_find_first(raw_tf, IKEV2_ATTR_CONTAINER))
+    return Transform(transform_type=t_type, transform_id=t_id, attrs=attrs)
+
+
+def _ikev1_transform(raw_tf: dict[str, Any]) -> Transform | None:
+    """One IKEv1 transform: a whole candidate suite carried as attributes.
+
+    ``isakmp.trans.id`` is the transform ID (``KEY_IKE`` for Phase 1); the
+    algorithms are all in ``isakmp.ike.attr``. See ``IKEV1_NO_TRANSFORM_TYPE``
+    for why the type is a sentinel.
+    """
+    t_id = _to_int(_find_first(raw_tf, "isakmp.trans.id"))
+    if t_id is None:
+        return None
+    attrs = _parse_attrs(_find_first(raw_tf, IKEV1_ATTR_CONTAINER))
+    return Transform(transform_type=IKEV1_NO_TRANSFORM_TYPE, transform_id=t_id, attrs=attrs)
+
+
+def _parse_transforms(
+    proposal_tree: dict[str, Any], ike_version: IkeVersion
+) -> tuple[Transform, ...]:
+    parse = _ikev2_transform if ike_version is IkeVersion.IKEV2 else _ikev1_transform
+    transforms = [parse(tree) for tree in _payloads_of_type(proposal_tree, PAYLOAD_TRANSFORM)]
+    return tuple(t for t in transforms if t is not None)
+
+
+def _parse_proposals(
+    isakmp: dict[str, Any], ike_version: IkeVersion
+) -> tuple[Proposal, ...] | None:
+    """Every proposal in every SA payload of one message, or ``None``.
+
+    ``None`` rather than an empty tuple is the signal ``build_negotiations``
+    uses to skip a message that carries no cleartext SA payload at all --
+    IKEv1 Quick Mode, IKEv2 IKE_AUTH -- which is most of a capture.
+    """
     proposals = []
-    for raw_prop in _as_list(proposal_container):
-        if not isinstance(raw_prop, dict):
-            continue
-        number = _to_int(_find_first(raw_prop, "isakmp.prop.number")) or 0
-        protocol_id = _to_int(_find_first(raw_prop, "isakmp.prop.protoid")) or 0
-        tf_container = _find_first(raw_prop, "isakmp.tf")
-        proposals.append(
-            Proposal(
-                number=number, protocol_id=protocol_id, transforms=_parse_transforms(tf_container)
+    for sa_tree in _payloads_of_type(isakmp, SA_PAYLOAD_TYPES):
+        for prop_tree in _payloads_of_type(sa_tree, PAYLOAD_PROPOSAL):
+            proposals.append(
+                Proposal(
+                    number=_to_int(_find_first(prop_tree, "isakmp.prop.number")) or 0,
+                    protocol_id=_to_int(_find_first(prop_tree, "isakmp.prop.protoid")) or 0,
+                    transforms=_parse_transforms(prop_tree, ike_version),
+                )
             )
-        )
     return tuple(proposals) if proposals else None
 
 
 def _nat_detected(isakmp: dict[str, Any]) -> bool:
-    notify_container = _find_first(isakmp, "isakmp.notify")
-    for raw_notify in _as_list(notify_container):
-        if not isinstance(raw_notify, dict):
+    """Whether this message carries NAT-detection payloads. Step 4.7.
+
+    This is "the peers ran NAT discovery", not "a NAT was found": the answer
+    to the latter is a comparison of the hash in the payload against one
+    computed over the observed addresses, and a capture taken on one side
+    cannot make it. LLD section 6.4 treats the presence of the exchange as the
+    observable, and ``correlate.py`` reports it under that name.
+
+    IKEv2 carries the discovery as notify types 16388/16389. IKEv1 (RFC 3947)
+    carries it as its own NAT-D payload type instead, with no notify at all,
+    so a notify-only check answers ``False`` for every IKEv1 capture.
+    """
+    for payload_type, tree in _walk_payloads(isakmp):
+        if payload_type == PAYLOAD_IKEV1_NAT_D:
+            return True
+        if payload_type not in NOTIFY_PAYLOAD_TYPES:
             continue
-        msg_type = _to_int(_find_first(raw_notify, "isakmp.notify.msgtype"))
+        msg_type = _to_int(_find_first(tree, "isakmp.notify.msgtype"))
         if msg_type in (NOTIFY_NAT_DETECTION_SOURCE_IP, NOTIFY_NAT_DETECTION_DESTINATION_IP):
             return True
     return False
@@ -399,9 +600,10 @@ def parse_isakmp_json(raw_packets: Sequence[dict[str, Any]]) -> list[IsakmpMessa
         ike_version = _ike_version(isakmp)
         exchange_type = _to_int(_find_first(isakmp, "isakmp.exchangetype")) or 0
         message_id = _to_int(_find_first(isakmp, "isakmp.messageid")) or 0
-        init_spi = str(_find_first(isakmp, "isakmp.init_spi", "isakmp.icookie") or "")
-        resp_spi = str(_find_first(isakmp, "isakmp.resp_spi", "isakmp.rcookie") or "")
-        sa_payload = _parse_proposals(_find_first(isakmp, "isakmp.sa"))
+        init_spi = _spi(_find_first(isakmp, "isakmp.ispi", "isakmp.init_spi", "isakmp.icookie"))
+        resp_spi = _spi(_find_first(isakmp, "isakmp.rspi", "isakmp.resp_spi", "isakmp.rcookie"))
+        sa_payload = _parse_proposals(isakmp, ike_version)
+        length = _to_int(_find_first(isakmp, "isakmp.length")) or 0
 
         messages.append(
             IsakmpMessage(
@@ -416,6 +618,7 @@ def parse_isakmp_json(raw_packets: Sequence[dict[str, Any]]) -> list[IsakmpMessa
                 resp_spi=resp_spi,
                 sa_payload=sa_payload,
                 nat_detected=_nat_detected(isakmp),
+                length=length,
             )
         )
     return messages
@@ -510,14 +713,30 @@ def _encryption(
         return None, None
     if ike_version is IkeVersion.IKEV2:
         t = selected.transform(TRANSFORM_TYPE_ENCR)
-        return (
-            (ikev2_encryption_alg(t.transform_id), t.attr(ATTR_KEY_LENGTH)) if t else (None, None)
-        )
+        if t is None:
+            return None, None
+        alg = ikev2_encryption_alg(t.transform_id)
+        return alg, _keylen(t, alg)
     t = selected.transforms[0] if selected.transforms else None
     if t is None:
         return None, None
     raw = t.attr(IKEV1_ATTR_ENCRYPTION_ALGORITHM)
-    return (ikev1_encryption_alg(raw), t.attr(ATTR_KEY_LENGTH)) if raw is not None else (None, None)
+    if raw is None:
+        return None, None
+    alg = ikev1_encryption_alg(raw)
+    return alg, _keylen(t, alg)
+
+
+def _keylen(transform: Transform, alg: EncryptionAlg) -> int | None:
+    """The negotiated key length, or the one the cipher fixes by definition.
+
+    A 3DES proposal carries no key-length attribute because 3DES has nothing
+    to negotiate, and returning ``None`` there reports "unknown" for a value
+    that is not unknown at all. The attribute always wins when present, so
+    this cannot overwrite something actually observed.
+    """
+    negotiated = transform.attr(ATTR_KEY_LENGTH)
+    return negotiated if negotiated is not None else fixed_key_length_bits(alg)
 
 
 def _integrity(selected: Proposal | None, ike_version: IkeVersion) -> IntegrityAlg | None:
@@ -612,3 +831,106 @@ def _downgrade_available(
         for proposal in proposed
         for candidate in _all_encryption_choices(proposal, ike_version)
     )
+
+
+# ===========================================================================
+# Step 9.4's input: exchange sizes, grouped by endpoint pair
+# ===========================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class ExchangeSizes:
+    """CREATE_CHILD_SA and baseline message sizes for one pair of endpoints.
+
+    Track B's PFS inference (LLD section 7.4) works on the *size delta* between
+    a Child SA rekey that carried a fresh key exchange and one that did not, so
+    it needs both series and neither is an SA payload -- which is why they are
+    collected here rather than folded into ``IkeNegotiation``, whose every
+    field describes a negotiation's *contents*.
+
+    Grouped by endpoint pair rather than by IKE SPI on purpose: an IKE SA that
+    rekeys itself changes SPI, and the CREATE_CHILD_SA exchanges before and
+    after that are the same tunnel's rekeys and belong in one series.
+    """
+
+    src: str
+    dst: str
+    create_child: tuple[int, ...]
+    informational: tuple[int, ...]
+    """INFORMATIONAL exchange sizes.
+
+    **Not a PFS baseline, despite being the obvious candidate.** LLD section
+    7.4 measures the size a KE payload adds to a CREATE_CHILD_SA, so the
+    baseline has to be a CREATE_CHILD_SA *without* one. An INFORMATIONAL
+    exchange is not that: it also lacks the SA proposal, the nonce and both
+    traffic-selector payloads, which on a real capture measured 88 bytes --
+    larger than the entire 72-byte KE payload of an ECP-256 group.
+
+    Using it as the baseline inverts the answer for every ECP group: a PFS-on
+    tunnel shows a 160-byte delta against an expected 72 and is reported
+    PFS-off, while a PFS-off tunnel shows 88 and is reported PFS-on. It
+    happens to give the right answer for MODP-2048 only because the 264-byte
+    KE payload dominates the unmodelled 88 and the tolerance is generous.
+
+    Kept because the series is real and worth having; passed to ``infer_pfs``
+    as a baseline by nothing.
+    """
+
+    def matches(self, src: str, dst: str) -> bool:
+        return {self.src, self.dst} == {src, dst}
+
+    @property
+    def ke_free_create_child(self) -> tuple[int, ...]:
+        """CREATE_CHILD_SA exchanges known to carry no KE payload.
+
+        Always empty, and deliberately so. Distinguishing a rekey that carried
+        a fresh key exchange from one that did not is precisely the question
+        ``infer_pfs`` is asked, so an implementation that answered it here
+        would be assuming its own conclusion. A capture of a uniformly
+        configured tunnel contains only one kind, and nothing in it says which.
+
+        The property exists to make the absence explicit at the call site
+        rather than leaving a caller to reach for ``informational`` because it
+        is the only other series available.
+        """
+        return ()
+
+
+def exchange_sizes(messages: Sequence[IsakmpMessage]) -> list[ExchangeSizes]:
+    """Collect per-endpoint-pair CREATE_CHILD_SA and INFORMATIONAL sizes.
+
+    INFORMATIONAL sizes are collected because they are real and cheap to gather,
+        **but they are not a PFS baseline** -- see ``ExchangeSizes.informational``
+        for the measurement showing that using them inverts the answer for every
+        ECP group.
+
+        IKEv1 is absent by construction: it has no CREATE_CHILD_SA, its Quick Mode
+        rekeys are encrypted, and LLD section 7.4's method does not apply to them.
+    """
+    grouped: dict[tuple[str, str], tuple[list[int], list[int]]] = {}
+    for message in messages:
+        if message.ike_version is not IkeVersion.IKEV2 or not message.length:
+            continue
+        key = (
+            (message.src, message.dst)
+            if message.src <= message.dst
+            else (
+                message.dst,
+                message.src,
+            )
+        )
+        create_child, informational = grouped.setdefault(key, ([], []))
+        if message.exchange_type == IKE_EXCHANGE_TYPE_CREATE_CHILD_SA:
+            create_child.append(message.length)
+        elif message.exchange_type == IKE_EXCHANGE_TYPE_INFORMATIONAL:
+            informational.append(message.length)
+
+    return [
+        ExchangeSizes(
+            src=src,
+            dst=dst,
+            create_child=tuple(create_child),
+            informational=tuple(informational),
+        )
+        for (src, dst), (create_child, informational) in grouped.items()
+    ]

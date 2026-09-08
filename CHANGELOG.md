@@ -17,6 +17,926 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Fixed — the messaging peer's `TCP_NODELAY` failed on Linux CI
+
+`_Peer.__init__` disabled Nagle unconditionally. `test_messaging_peer.py`'s
+`test_a_periodic_stanza_reschedules_itself` drives the class through
+`socket.socketpair()`, which returns an **AF_UNIX** pair on Linux — where an
+`IPPROTO_TCP` option is not redundant but rejected, `OSError: [Errno 95]
+Operation not supported`. Windows emulates `socketpair()` over loopback TCP and
+accepts the call, so the suite was green on the development machine and red in
+GitHub Actions, on a line that had nothing to do with what the test asserts.
+
+The `setsockopt` is now guarded on `sock.family in (AF_INET, AF_INET6)`, which
+is the real precondition: Nagle is a TCP algorithm and there is nothing to
+disable on a Unix socket. `serve()` and `send()` both build `AF_INET`/`AF_INET6`
+sockets, so generated traffic keeps one stanza per segment — the property the
+guard had to preserve, since coalescing a burst would flatten the shape the
+`messaging` class exists to produce.
+
+Verified in both directions against stub sockets: an AF_UNIX-family socket whose
+`setsockopt` raises `OSError(95)` now constructs, and an `AF_INET` one still
+receives exactly `(IPPROTO_TCP, TCP_NODELAY, 1)`.
+
+### Added — Phase 11 finished: 11.5 and 11.6 land, and MT-08/09 are all that is left
+
+**11.5 Demo captures** — `testbed/demo_captures.py`, `dataset/demo/`
+
+The two PRD §16 tunnels, frozen and committed: `demo-tunnel-a` (IKEv1
+aggressive, 3DES-CBC, HMAC-SHA1-96, DH-2, PFS off, 24-hour lifetime, transport,
+VoIP) and `demo-tunnel-b` (IKEv2, AES-256-GCM, DH-19, PFS on, 1-hour lifetime,
+tunnel, the same call). 13117 and 13248 packets; 3.1 and 3.5 MB.
+
+**Done when — both committed, and neither appears in any training split.**
+
+The second half needed care, because the matrix *already* contains both tunnels
+as `weak-reference` and `hardened-reference`, and the sampler generates them
+regardless of what pairwise picks. Measured on the real split, `weak-reference`
+is in the **test** fold and `hardened-reference` is in the **calibration** fold
+— so demoing on the matrix fixtures would have meant demonstrating the
+classifier's confidence on the capture that fitted its calibrator.
+
+So the demo tunnels are their own configurations, in their own directory, with
+their own seed, and `tests/test_demo_captures.py` asserts the property against
+`split_configs` rather than trusting it. It carries a control —
+`test_the_reference_fixtures_do_land_in_a_fold` — because otherwise the
+assertion would pass just as well against a splitter that placed nothing at all.
+
+What is *not* claimed: the tunnel parameters are PRD §16's and therefore
+identical to those two dataset configurations. The demo is a tool being
+demonstrated, not a held-out evaluation, and the module docstring says so.
+
+**11.6 Demo rehearsal** — `scripts/demo_rehearsal.py`, and it passes
+
+**3/3 clean runs, 21.1–21.2 s each** against PRD §16's two-minute target.
+
+The harness drives PRD §16's sequence over HTTP and **asserts on each step**
+rather than timing it. A rehearsal that only reports a number tells you the
+stack was fast, not that the demo works — so it checks that tunnel A's findings
+are not empty and B's list is shorter, that B scores *higher*, that the
+classifier actually returned a class, that the report really begins `%PDF`.
+
+| step | result | |
+|---|---|---|
+| 1. tunnel A (weak) | score **25**, 7 findings, 1 critical | 8.4 s |
+| 2. traffic classifier | **voip at confidence 1.0, exposure 100** | 0.0 s |
+| 3. tunnel B (hardened) | score **80** (+55), 2 findings | 8.4 s |
+| 3b. comparison | delta 55, 5 findings only in A | 2.1 s |
+| 4. executive report | 17 KB PDF | 2.4 s |
+
+The three runs agreeing to the finding is NFR-4 visible from outside.
+
+**Still needs a person, and MT-19 says so:** this drives the API, not the
+browser. It does not prove the threat matrix lights up, or that the progress bar
+moves rather than jumping from 0 to 100.
+
+**11.8 was not done.** It is a screen recording with narration and needs someone
+to record it. `docs/demo-script.md` is the shot list and narration it would be
+recorded from, with PRD §4.1's metadata-exposure line written out, but the video
+does not exist.
+
+### Fixed — `MODEL_DIR` had never worked, on any deployment
+
+Found by running the rehearsal against the offline stack, which is the first
+time this project has run its own API with models on disk.
+
+`Settings.model_dir` existed. `docker-compose.offline.yml` set it. And
+`JobRunner` never passed it to `analyse_capture`, so the pipeline defaulted it
+to `None` — and `None` means *no models*.
+
+**Nothing raised, and nothing could.** `track_b/service.py` is deliberately
+built to degrade: no model directory means every model-backed attribute comes
+back UNAVAILABLE **with a reason**, and the run succeeds. So the symptom was a
+complete, internally consistent, entirely plausible assessment saying
+
+> no trained model is available for this deployment. The classifier
+> (implementation-plan steps 9.6-9.9) requires the labelled dataset from
+> Phase 8, which has not been generated.
+
+on a deployment where the dataset *had* been generated and the models were
+sitting in `backend/models/`. The note read as correct, because it is exactly
+what a model-free build should say. `model_versions` was `{}` and the
+metadata-exposure score was 0 — which the schema documents as "an absence of
+evidence, not evidence that the tunnel leaks nothing", and which is precisely
+the sentence that made it look handled.
+
+This is the failure mode this project's whole design is arranged against, and it
+survived because the design worked: the degradation was so graceful that nothing
+distinguished a misconfiguration from an honest gap.
+
+`tests/test_api_jobs.py::test_the_configured_model_dir_reaches_the_pipeline` now
+holds that path open. It asserts at the wiring rather than through a real model,
+because a test needing trained artefacts would be skipped in exactly the build
+where those artefacts are missing.
+
+### Fixed — an assessment that ran models recorded that it had not
+
+The same run that found `MODEL_DIR` unwired found its twin one layer up. The
+pipeline builds the inference service and uses it, and then calls
+`engine.evaluate` **without** `model_versions`, so every assessment ever
+produced carried `{}`.
+
+`{}` is not an unset field. `core/schema.py` documents it as meaning *no
+inference ran*, and the technical report acts on that: it prints
+`Models: none loaded` and renders a whole section explaining that the
+model-backed fields were unavailable in this build. So on the demo capture the
+report stated, in print, that no model had run — on the same page as a
+classifier result of VoIP at confidence 1.0.
+
+Fixed by passing `service.model_versions`, which hashes the artefacts on disk
+rather than trusting a string a training run wrote beside them. The technical
+report now reads:
+
+```
+Models: traffic_classifier=sha256:6c474eea866e01d1
+        mode_classifier=sha256:3a7e7519bd3b8fcd
+        calibration=sha256:d8ad6131a24133b9
+```
+
+`test_an_assessment_records_the_models_that_produced_it` asserts **both**
+directions — empty for a build with no artefacts, populated for one with them —
+because it was the threading that broke, and a one-sided test passes against a
+pipeline that hardcodes `{}`.
+
+### Fixed — the offline stack had never been started, and four things were wrong
+
+Step 11.4 shipped a compose file, two Dockerfiles and a claim. MT-18 says
+"compose topology is the kind of claim that is either true or quietly false, and
+only a run tells you which". The run says: false, four times over — and every
+one of them produced a stack that came up and looked right.
+
+1. **`frontend/` had no `.dockerignore` at all.** npm on Windows materialises
+   its cache under the reserved name `NUL`; the Docker daemon cannot read that
+   path, so the image would not build (`error from sender: open frontend\NUL:
+   Incorrect function`). Because `NUL/` is gitignored it does not appear in
+   `git status`. The same missing file also meant the build stage's `COPY . .`
+   was overwriting the `node_modules` the deps stage had just installed with
+   whatever the host had — a Linux image carrying a Windows install of anything
+   with a native binding.
+2. **The compose `command:` ran `uv run`.** `uv run` re-resolves the project
+   environment before executing, which needs an index, which needs DNS — on an
+   `internal: true` network with no route anywhere. It failed with "Could not
+   connect, are you offline?", the right answer to the wrong question. The image
+   already puts `/app/.venv/bin` on `PATH`; `alembic` and `uvicorn` are there
+   without it.
+3. **That `command:` was a YAML `>` folded block, and folding does not fold
+   everything.** A line indented further than the first keeps its newline, so
+   `sh` received two commands and the second began `--host`. Symptom:
+   `sh: 4: --host: not found`.
+4. **`libgomp1` was missing from the backend image.** It is LightGBM's OpenMP
+   runtime and both trained models are LightGBM boosters, so `import lightgbm`
+   raised `libgomp.so.1: cannot open shared object file` — caught, logged, and
+   degraded to UNAVAILABLE, exactly as in the defect above.
+
+One more turned up on the way: **`backend/Dockerfile` never copied `models/`
+at all**, so `MODEL_DIR` pointed at a directory that did not exist. It was
+written before the artefacts were committed — correct when written, silently
+wrong afterwards. **MT-26** now opens the image and looks.
+
+`backend/.dockerignore` also excluded `models/*.pt`, and that one turned out
+*not* to be a defect: `traffic_cnn.pt` is the CNN, inference deliberately loads
+the LightGBM booster so that torch is not a runtime dependency, and the file is
+gitignored for the same reason — a clean clone does not have it either. The
+exclusion is kept, now with the reasoning written next to it rather than left
+to be rediscovered.
+
+### Added — the `messaging` class is learnable, by making the generator honest
+
+Resolves the open spec question recorded below, by its first option: enrich the
+generator rather than lower the floor.
+
+`messaging` contributed **zero training rows**. At roughly one packet per second
+a 10-second window held 7–10 packets against LLD §7.6's floor of 20, so every
+window was discarded and the traffic classifier was silently a six-class model.
+
+**It was not fixed by making messaging faster.** Raising the rate until the
+windows cleared the floor would be meeting a target by changing the data. It was
+fixed by modelling what a real messaging connection actually carries — all of it
+genuinely messaging traffic, and none of it in the generator:
+
+* chat states (XEP-0085) — the "typing…" indicator, around each message;
+* delivery receipts (XEP-0184) and read markers (XEP-0333) — the two ticks and
+  the blue tick, one of each **per message**;
+* message bursts, because people send "hey", then "you there", then the point;
+* keepalive pings, because the connection is long-lived and NAT bindings are not;
+* roster presence, because the connection is client-to-server and carries every
+  contact's state changes, not only the open conversation.
+
+The 1–12 second idle gap between conversational turns is **unchanged**. The
+enrichment clusters small packets around each turn; it does not fill the
+silences that define the class.
+
+```
+before:   61 packets ->  0 windows
+after:   678 packets -> 17 windows, 28-116 packets each
+```
+
+32 messaging sessions regenerated, 0 failures. All seven of PRD §9.2's classes
+now reach the model, `metrics.json`'s `classes_absent` is empty, and the model
+card no longer opens with a class-count banner because there is nothing left to
+warn about.
+
+**The first draft of the enrichment was worse than the original**, and it is
+worth recording because it looked fine. It replied per *message* rather than per
+*turn*, so a three-message burst drew three replies, each opening a turn of up to
+three more. Measured on loopback: 28 packets in the first 10-second window, 1565
+in the ninth — an exponential ramp that still looked like ordinary chat traffic
+from the outside, and that would have destroyed the class's signature in the
+opposite direction. `tests/test_messaging_peer.py` asserts both bounds: every
+window clears the floor, *and* the rate does not compound.
+
+### Fixed — ML-2 was reading the one length the inner header cannot move
+
+Step 9.9's mode classifier scored **0.7273** against its 0.90 target. Measuring
+its four features across all 216 sessions said why, and none of it was the
+model's fault.
+
+**Two of the four features are constant.** `spi_pairs_per_endpoint` takes exactly
+one distinct value across every session (two SPIs over two endpoints — always
+1.0), and `cleartext_ratio` takes exactly one (0.0; there is no correlated
+cleartext on a private bridge). They are LLD §7.3's, and would carry signal on a
+real capture with several SAs and side traffic. Here they carry none. Kept, and
+now documented as carrying none, which is more useful than dropping them.
+
+**The remaining length feature measures the wrong length.** Tunnel mode adds 20
+bytes (IPv4) or 40 (IPv6) to every packet — but the path MTU caps the packet, so
+for any class that saturates the MTU the header *displaces* payload instead of
+adding to it. Median tunnel-minus-transport difference in modal ESP length:
+
+```
+icmp v4  +8    voip v4 +30    video v4 +18    web v4  -4    file_transfer v4  0
+icmp v6 +40    voip v6 +40    video v6 +60    web v6   0    file_transfer v6  0
+```
+
+Three of the six classes — `web`, `file_transfer` and `email`, which is most of
+the bulk traffic there is — show no signal at all. A classifier cannot beat
+chance on them, and 0.73 is what that looks like.
+
+**The minimum length carries what the maximum hides.** The smallest packets in
+any flow are pure acknowledgements, keepalives and control: far enough below the
+MTU that the inner header adds to them rather than displacing anything. The same
+measurement on `min(esp_payload_len)` is positive for **every** class in both IP
+versions — +8 to +60, tracking the 20- and 40-byte headers — including all three
+where the modal length is flat.
+
+**And the baseline those offsets are measured against was invented.**
+`EXPECTED_MODAL_LEN` was a hand-written table of round numbers. Measured against
+the corpus it is wrong by up to **672 bytes** (`web` written as 800, observed at
+1472) on an effect that is 20. A baseline whose error is thirty times the signal
+does not blur a feature, it replaces it. `ModeBaseline` is now *fitted*: the
+median transport-mode geometry per (traffic class, IP version), from the training
+fold only, stored in `mode_lightgbm.meta.json` and loaded with the model so the
+offsets cannot silently be computed against nothing at inference time.
+
+| | accuracy |
+|---|---|
+| four features, hardcoded table | 0.7500 |
+| plus `min_len_offset` and `inner_header_bytes`, fitted baseline | 0.9231 |
+| final, retrained on all 248 sessions with ML-1 in the loop | **1.0000** |
+
+Step 9.9's target is met. **1.0000 over 52 held-out sessions is reported with the
+same caveat as ML-1's**, and the model card carries it: `min_len_offset` is close
+to a *direct measurement* of the thing being classified rather than a learned
+proxy for it, and this testbed presents one clean SA pair at a fixed MTU. Real
+traffic has several SAs, varying path MTUs and fragmentation, and the baseline is
+fitted to these generators. Step 9.12 is still the only measurement that would
+say by how much.
+
+### Verified — MT-15 and MT-24, which had never been run
+
+- **MT-15** (step 3.2): the reader's packet count against tshark on *real*
+  captures, rather than the synthetic pcaps the automated suite builds. Run
+  against the pinned tshark 4.4.18 inside the backend image rather than a host
+  binary, which is stricter — that is the version Track A parses. Four captures
+  spanning both IP versions, both IKE versions and three cipher suites:
+  7120/7120, 7123/7123, 678/678, 684/684. Exact.
+- **MT-24** (step 9.8): `docs/model-card.md` regenerates byte-identically from
+  `models/metrics.json`. This also fixed a defect of exactly the kind MT-24
+  exists to catch — the Limitations section read "Seven classes, closed set"
+  while the model had six. The count is now taken from the artefact.
+
+### Not verified — what is still open
+
+- **Step 9.12, external validation, remains unmeasured.** ISCXVPN2016 has not
+  been downloaded. Every internal score in this release measures how distinct
+  this testbed's generators are; none of them is evidence of generalisation. The
+  model card says so in its own section rather than in a footnote.
+- **MT-08 and MT-09** still need a Neon connection string, which was not
+  available here. They are the only two rows in `manualtesting.md` still marked
+  **Not run**.
+- **Step 11.8, the demonstration video, does not exist.** `docs/demo-script.md`
+  is what it would be recorded from.
+- **The dashboard has not been walked by eye on the offline stack.** The
+  rehearsal drives the API; MT-19 records what that leaves unproven.
+
+### Fixed — PFS inference reported the *opposite* of the truth for every ECP group
+
+Found by running step 9.4 against the one capture in existence that contains
+real `CREATE_CHILD_SA` exchanges — the 700-second rekey probe, DH-19, PFS on.
+It reported `pfs_enabled: false`, INFERRED, at 0.65 confidence. PFS being off
+is a security weakness; this is a false positive in a security report.
+
+The cause is a baseline this project chose wrongly when wiring step 9.4.
+LLD §7.4 measures how much larger a `CREATE_CHILD_SA` carrying a KE payload is
+than one that does not, so the baseline must be **a `CREATE_CHILD_SA` without a
+KE payload**. `exchange_sizes` supplied INFORMATIONAL exchanges instead, on the
+reasoning that they are the one IKEv2 exchange that never carries a KE and are
+routinely present.
+
+They also never carry the SA proposal, the nonce, or either traffic-selector
+payload. Measured on the real capture that difference is **88 bytes** — larger
+than the entire 72-byte KE payload of an ECP-256 group. So the delta being
+compared was the KE payload plus 88 bytes of structure that has nothing to do
+with PFS:
+
+| Group | Expected delta | Accepted range | PFS on → | PFS off → | Confidence |
+|---|---|---|---|---|---|
+| 19 (ECP-256) | 72 | 43–101 | delta 160 → **False** ✗ | delta 88 → **True** ✗ | 0.65 |
+| 14 (MODP-2048) | 264 | 158–370 | delta 352 → True ✓ | delta 88 → False ✓ | 0.90 |
+
+**For ECP groups the answer is inverted, not merely noisy.** For MODP it is
+right by accident: the 264-byte KE payload dominates the unmodelled 88, and the
+40% tolerance is wide enough to swallow the remainder.
+
+Two things kept this from reaching a score. `policies/baseline.yaml`'s PFS rule
+carries `confidence_gte: 0.7` and the ECP confidence is 0.65, so the false
+finding never fired — the confidence guard doing precisely the job it was
+written for. And no dataset session rekeys at all (90-second sessions, 3600-second
+lifetimes), so `create_child` is empty for all 248 and PFS was already
+UNAVAILABLE there. The wrong value was reachable only on a capture long enough
+to rekey, which is the case a real deployment presents.
+
+**The fix is to stop supplying a baseline that is not one.**
+`ExchangeSizes.informational` is now named for what it is and documented as not
+a PFS baseline; `ExchangeSizes.ke_free_create_child` is the correct input and
+is always empty, because distinguishing a rekey that carried a fresh key
+exchange from one that did not *is the question `infer_pfs` is asked* — an
+implementation that answered it while assembling the input would be assuming
+its own conclusion. A capture of a uniformly configured tunnel contains only
+one kind of rekey and nothing in it says which.
+
+So PFS is now UNAVAILABLE with its reason rather than backwards:
+
+```
+create_child=14 exchanges, informational=17, ke_free=()
+infer_pfs -> unavailable
+note: no exchange without a key-exchange payload was captured, so there is
+      no baseline to measure the CREATE_CHILD_SA against
+```
+
+`infer_pfs` itself was never wrong and is unchanged — given genuine KE-free
+sizes it separates DH-14 PFS-on from PFS-off correctly and returns a lower
+confidence for ECP, which is step 9.4's **Done when** and is now tested on the
+inputs the method actually calls for.
+
+**Step 9.4 is therefore implemented and correct, and undemonstrable end to end
+on a single capture.** Measuring PFS this way needs a KE-free `CREATE_CHILD_SA`
+in the same capture, which a uniformly configured tunnel never produces. Either
+the analyser needs a reference for what a KE-free rekey costs on that tunnel, or
+LLD §7.4's method needs a second signal. That is a decision about the
+specification, and it is recorded here rather than papered over with a value
+that is right 50% of the time by construction.
+
+### Fixed — four UNAVAILABLE notes claimed Track B was unimplemented
+
+`operating_mode`, `pfs_enabled`, `observed_rekey_s` and `replay_sane` each
+carried a Track A note ending "which Track B does not yet implement". Track B
+implements all four. The notes are what a reader sees in the report when a
+value is missing, so a stale one is a wrong explanation for a real gap — the
+same defect class as a wrong value, in the field whose entire job is to say why
+there isn't one. They now describe the division of labour instead.
+
+### Added — Phase 8 generated, Phase 9 trained: the measured results
+
+> **Superseded in part.** Two numbers here are no longer this build's: ML-2's
+> 0.7273 (now 1.0000 — the mode classifier was reading the wrong length) and the
+> six-class traffic classifier (now seven — messaging contributes rows). Both are
+> at the top of this file. The rest of this entry, including why a macro-F1 of
+> 1.0000 is a reason to investigate rather than to celebrate, still stands.
+
+**The dataset.** 248 sessions, 0 failures, 14 GB, generated by six concurrent
+shards in about 27 minutes of wall clock. 62 configurations x 4 traffic runs,
+which is how PRD §9.3's "at least 200" is met. Balanced by construction: v4
+124 / v6 124, transport 124 / tunnel 124, ikev1-aggressive 84 / ikev1-main 80 /
+ikev2 84.
+
+**The models.** Trained on 216 of those sessions — `messaging` contributes
+none, for the reason recorded above — giving 2546 train / 584 calibration / 797
+test windows over 35 / 8 / 11 disjoint configurations.
+
+| Model | Metric | Result | Target | |
+|---|---|---|---|---|
+| ML-1 LightGBM | macro-F1 | 1.0000 | — | baseline |
+| ML-1 CNN | macro-F1 | 0.9988 | ≥0.85 (PRD §8.4) | met |
+| ML-1 CNN | ECE | 0.0021 | ≤0.10 (PRD §8.4) | met |
+| ML-2 mode | accuracy | **0.7273** | ≥0.90 (step 9.9) | **NOT MET** |
+
+**The traffic-classifier scores do not mean what they look like, and the model
+card says so in its own section rather than in a footnote.** A macro-F1 of
+1.0000 is a reason to investigate, and two things were checked before it was
+published.
+
+*It is not leakage.* Train, calibration and test hold disjoint sets of
+configurations — verified directly on the real split, not assumed: no
+configuration in two folds, no session whose windows span a boundary.
+
+*It is a nearly separable task.* The seven classes are produced by different
+tools at rates differing by orders of magnitude, and they separate on single
+features. Mean `packet_count` per 10-second test window: icmp 105, email 307,
+voip 902, video 1824, web 4627, file_transfer 18071. `up_down_byte_ratio`: web
+0.03, icmp and voip 1.0, email 31, file_transfer 812, video 3833. A one-feature
+decision stump separates most of them.
+
+So the figure measures **how distinct this testbed's generators are**, not how
+the model would classify real traffic. The only measurement that answers the
+second question is step 9.12's external validation, which is unmeasured. The
+scores are a lower bound on the difficulty of the task as posed, and are
+labelled as such.
+
+**ML-2 misses its target and is reported as missing it.** 0.7273 against 0.90.
+It is scored per *session* over 44 held-out sessions rather than per window:
+operating mode is a property of the SA, and per-window scoring would have
+counted one tunnel's eighteen windows as eighteen independent correct answers
+and inflated the figure into passing.
+
+### Fixed — temperature scaling drove every confidence to 1.0
+
+The first training run fitted **T = 0.0375**. A temperature below 1 does not
+calibrate, it *sharpens*: dividing every logit by 0.0375 multiplies it by 26.7
+and pushes every prediction towards certainty.
+
+The cause is the task's separability. Temperature scaling minimises NLL, and on
+a calibration fold the model never gets wrong (584/584 correct here) NLL falls
+monotonically as confidence rises, so the optimiser walks T towards zero. The
+model would then have gone on to be wrong in deployment at essentially 100%
+confidence — the worst property a number can have when it sits in a security
+report next to the word INFERRED, and precisely the failure PRD §8.3 exists to
+prevent.
+
+No temperature fixes this, because a fold with no errors carries no information
+about how wrong the model is when it is wrong. `fit_temperature` now detects the
+condition and returns T=1.0 with the reason logged and recorded, rather than a
+number that would have looked like successful calibration:
+
+```
+WARNING: the calibration fold contains no errors (584/584 correct), so
+temperature scaling is degenerate and would drive confidence to 1.0.
+Leaving the CNN uncalibrated (T=1.0)
+```
+
+Test scores are unchanged by the fix, as they must be — temperature scaling
+never alters a prediction, only its confidence.
+
+### Added — per-session progress in the verification harness
+
+`testbed.verify` over 248 sessions is the better part of an hour, and it
+printed nothing until the end. There was no way to tell a slow run from a stuck
+one. It now logs `[n/total] session-name` as it goes, with `--quiet` to
+suppress it.
+
+### Open spec question — LLD §7.6's window floor makes PRD §9.2's sparsest class unlearnable
+
+> **Resolved** by resolution 1 below — the messaging generator was enriched, not
+> the floor lowered. See "the `messaging` class is learnable, by making the
+> generator honest" at the top of this file. Left in place because the reasoning
+> is what makes the resolution defensible, and because the measurements below
+> are what a future change to the windowing would have to argue against.
+
+Found by counting scorable windows per class across the finished dataset, and
+it is a conflict between two specifications rather than a bug in either
+implementation of them.
+
+LLD §7.6 requires fixed 10-second windows and says "a window needs at least 20
+packets to be scored". PRD §9.2 requires a `messaging` class, defined by its
+silences — small payloads separated by long irregular gaps. The testbed's
+generator realises that as a 1–12 second idle gap around each
+message-and-reply, which produces roughly one packet per second.
+
+Ten seconds at one packet per second is seven to ten packets. The floor is
+twenty. **Every messaging window in the dataset is discarded, so the class
+contributes zero training rows:**
+
+```
+class          sessions   windows/session (sampled)
+email                32   [14, 19, 19]
+file_transfer        48   [18, 18, 18]
+icmp                 28   [19, 18, 18]
+messaging            32   [ 0,  0,  0]
+video                32   [18, 18, 18]
+voip                 36   [18, 18, 18]
+web                  40   [19, 19, 19]
+```
+
+A longer session does not help: this is a rate, not a duration. At the matrix's
+own 180-second default the packet count doubles and the per-window count does
+not move.
+
+**The consequence for PRD §8.4's target.** Macro-F1 is defined over the seven
+classes. With one class absent from both training and test, a model that is
+perfect on the other six scores 6/7 = 0.857 — a figure that would sit just
+above the 0.85 threshold while the classifier had never seen a seventh of the
+problem. Reporting it that way would be the most misleading number this project
+could produce, so `metrics.json` and the model card record the class count the
+score is actually computed over.
+
+**This was not resolved by retuning the generator.** Raising the messaging
+packet rate until windows clear the floor would make the target met by
+changing the data, which is the failure this project has spent its whole
+lifetime guarding against. Two defensible resolutions exist and both are
+decisions about the specification rather than about the code:
+
+1. **Enrich the messaging model.** The generator sends messages and replies and
+   nothing else. Real XMPP or Signal traffic also carries presence updates,
+   typing indicators, delivery and read receipts, and keepalives, all of which
+   are genuine messaging packets. A model including them would clear the floor
+   *and* be more faithful, not less.
+2. **Make the window floor rate-aware.** The floor exists because percentile
+   features over three packets are noise. For a class whose defining property
+   *is* sparsity, discarding the sparse windows throws away precisely the
+   evidence that identifies it. A floor expressed as "enough packets to
+   estimate the features, or enough elapsed time at a stable low rate" would
+   admit messaging without admitting noise.
+
+Until one is chosen, the traffic classifier is a six-class model and is
+reported as one.
+
+### Fixed — the observed rekey interval was 0 seconds on every capture
+
+Reported as INFERRED at 0.95 confidence, which is the combination this project
+exists to prevent: a number, stated with near-certainty, that was never
+measured.
+
+`service.analyse` built its SPI series from a single `SAPair` — its forward
+SPI and its reverse SPI. Those are the two *directions* of one SA generation
+and they come up at the same instant, so the only interval available was
+between them, and it was always approximately zero. A rekey installs a new
+Child SA, hence a new SPI, which `ingest.assemble_flows` groups into a wholly
+**separate** `SAPair`; successive generations of a tunnel were therefore never
+visible from inside the pair being analysed.
+
+`replay.spi_series` now groups SPIs by *directed* endpoint pair across the
+whole capture, and `api/pipeline.py` hands each SA the series for its own
+direction. Directed rather than unordered because merging both directions
+reintroduces the same fault one level down: each generation contributes two
+simultaneous entries, so every other interval in the merged series is a
+spurious zero and the median collapses back to it.
+
+**Blast radius.** No rule in `policies/baseline.yaml` reads
+`observed_rekey_s`, so no score or finding was ever wrong because of this. What
+was wrong is the technical report, which renders "Observed rekey interval (s)"
+directly, and `Assessment.capabilities.rekey_observed`, which claimed the
+measurement had been made.
+
+**Done when — an observed rekey interval within 10% of a 300-second
+lifetime.** Demonstrated on a real 700-second capture from
+`testbed/rekey_probe.py`, which exists because nothing in the sampled matrix
+can produce one (every matrix row runs a 3600-second lifetime for 90 seconds,
+so no dataset session ever rekeys inside its own capture):
+
+```
+10.10.3.2 -> 10.10.3.3: SPI first-seen offsets 0.0, 288.5, 578.5
+   observed_rekey_s = 290s (inferred, confidence 0.95)
+   vs 300s configured: 3.3% -> WITHIN 10%
+10.10.3.3 -> 10.10.3.2: SPI first-seen offsets 0.0, 288.4, 578.5
+   observed_rekey_s = 290s (inferred, confidence 0.95)
+```
+
+Three generations, two rotations. Two rather than one on purpose: a single
+rotation cannot distinguish "rekeyed on time" from "rekeyed once, for some
+other reason".
+
+### Fixed — `over_time = 0s` stopped SAs rekeying at all
+
+A defect introduced by this project's own earlier fix, and found by the probe
+above rather than by any test.
+
+Zeroing `over_time` made the negotiated lifetime equal the configured one,
+which was the point. It also meant strongSwan deleted each SA at the exact
+instant it tried to rekey — the daemon expires an SA that has not rekeyed
+within `rekey_time + over_time`, and with no window there is nothing to rekey
+in. A 300-second tunnel captured for 700 seconds died at t=300 with the rekey
+exchange on the wire and 400 seconds of silence after it, while the session was
+recorded as successful.
+
+The dataset never saw it: at a 3600-second lifetime and 90-second sessions, no
+SA comes within an hour of expiry. That is the only reason this was not a
+corrupt corpus.
+
+`lifetime_s` now means the **hard lifetime that IKEv1 puts on the wire** —
+which is what `labels.json` claims it is — with `rekey_time` derived
+`REKEY_WINDOW_S` (10 seconds) below it. The negotiated value is unchanged, so
+sessions generated before and after this change agree; the SA now has a window
+three orders of magnitude larger than a CREATE_CHILD_SA needs; and the observed
+interval lands within a few percent of the configured lifetime rather than on
+the 10% boundary a proportional window would put it on.
+
+### Fixed — Track A observed *nothing* on real captures, and its tests could not tell
+
+The single most serious defect this project has had. Phase 4 was written with
+no Docker and no tshark, so `ike_parser.py` guessed tshark's ISAKMP JSON field
+names from documented `isakmp.*` display-filter names. Every structural guess
+was wrong. The parser ran cleanly, raised nothing, and returned an empty
+negotiation list for every capture — so every ESP flow came back
+`no IKE negotiation in this capture correlates to this SA`, and *every*
+Track A field was UNAVAILABLE with a plausible-sounding reason.
+
+The tests passed throughout, because `tests/_tshark_json.py` built its fixtures
+from the same guesses. Parser and fixtures agreed with each other and neither
+agreed with tshark.
+
+Found by running the pilot batch's first real capture through the pinned tshark
+(4.4.18) rather than through the test suite.
+
+**What tshark actually emits**, now read off real output rather than inferred:
+
+| Phase 4 assumed | tshark 4.4.18 emits |
+|---|---|
+| `isakmp.sa.proposals` / `isakmp.sa.proposal` / `isakmp.tf` container keys | no container keys at all — payloads are repeated `isakmp.typepayload` (a type number) and `isakmp.typepayload_tree` (its contents), aligned by position and nested recursively |
+| `isakmp.tf.attr` for both IKE versions | `isakmp.ike.attr` (IKEv1) and `isakmp.ike2.attr` (IKEv2) |
+| `isakmp.tf.id` | `isakmp.tf.id.encr` / `.prf` / `.integ` / `.dh` / `.esn` (IKEv2), `isakmp.trans.id` (IKEv1) |
+| `isakmp.init_spi` / `isakmp.icookie` | `isakmp.ispi` / `isakmp.rspi`, as colon-separated octets |
+| `isakmp.version` is a major version | the packed byte `0x20` — read as an integer it is 32, so **every IKEv2 capture was classified as IKEv1** and then searched for IKEv1 attributes that were not there |
+| attribute values are decimal | colon-separated octets (`00:05`, `00:01:73:40`) |
+| NAT detection is notify 16406/16407 | 16388/16389 (RFC 7296 §3.10.1) — the old pair matches nothing, so `nat_detected` was unreachable |
+
+`tests/_tshark_json.py` was rebuilt from that output. Its builders now take a
+neutral description of a message and render it in the dialect matching the IKE
+version, so a test says "an IKEv1 aggressive-mode proposal offering 3DES"
+without restating tshark's spelling — and a fixture cannot drift into a shape
+only the parser believes in.
+
+**Done when — Track A reproduces `labels.json`.** Demonstrated on both PRD §16
+reference tunnels, verified inside the backend image against the pinned tshark:
+
+```
+2 sessions verified
+  match          8
+  honest_gap     6
+  inferred       5
+  not_reported   2
+
+PASS
+```
+
+Before the fix the same two captures gave `match 0`, `not_reported 9`.
+
+### Fixed — `nat_traversal` was OBSERVED true on tunnels with no NAT
+
+A narrowing of the contract, and a deliberate deviation recorded below.
+`schema.py` and LLD §6 both define the field as "UDP/4500 encapsulation, **or**
+NAT_DETECTION notify payloads". Read literally that reports NAT traversal for
+every IKEv2 tunnel ever captured: RFC 7296 §3.10.1 *requires* the
+NAT_DETECTION notifies in every IKE_SA_INIT, so strongSwan sends them whether
+or not a NAT exists. Both reference tunnels — on a flat /24 with no NAT
+anywhere — reported `nat_traversal: true` as an OBSERVED fact.
+
+The notifies say the peers *looked* for a NAT. Only the switch to UDP/4500 says
+they *found* one, and RFC 3948 makes that switch mandatory when they do. So
+encapsulation is now the observation, and the discovery having run is demoted
+to the note. `PacketRecord.udp_encapsulated` carries the signal from ingest,
+where it was previously discarded — UDP-encapsulated ESP was recorded as plain
+`esp`, indistinguishable from the real thing.
+
+The field is now answerable on an ESP-only capture with no IKE in it at all,
+which it was not before.
+
+### Fixed — the testbed's ground truth disagreed with its own wire by 10%
+
+`negotiated_lifetime_s` came back 95040 against a `labels.json` expecting
+86400: strongSwan's `over_time` defaults to 10% of `rekey_time`, and IKEv1 puts
+the *hard* lifetime on the wire. Track A was reading it correctly; the label
+was wrong.
+
+Fixed in `swanctl.conf.j2` rather than by teaching the label about
+strongSwan's arithmetic — the configured value should be the negotiated value,
+which is what the ground truth claims it is. `over_time` is accepted on the
+connection only; a child block carrying it fails the whole connection with
+`unknown option: over_time`, which is verified empirically rather than assumed.
+
+**The first attempt at this — `over_time = 0s` — was wrong, and is superseded
+by "`over_time = 0s` stopped SAs rekeying at all" above.** It produced the
+right negotiated value and stopped every SA rekeying, which no test and no
+dataset session could see. The correct form keeps a small non-zero window and
+derives `rekey_time` below the configured lifetime instead.
+
+### Added — key lengths that the cipher fixes rather than negotiates
+
+`encryption_keylen` was UNAVAILABLE for every 3DES tunnel, because IKEv1 3DES
+carries no key-length attribute — there is nothing to negotiate. Reporting
+"unknown" for a value that is not unknown is the mirror image of a fabricated
+value, and `EncryptionAlg`'s own docstring already says these two ciphers'
+lengths are fixed by the algorithm. `transforms.FIXED_KEY_LENGTH_BITS` supplies
+168 for 3DES-CBC and 56 for DES-CBC (56 rather than 64: the parity bits are not
+key material, and 64 would overstate the weakest cipher in the matrix). The
+attribute always wins when present, so this can never overwrite an observation.
+
+Deliberately limited to those two. The AEAD members are excluded even though
+they are commonly deployed at one size: their IANA transform IDs do not pin a
+key length, and FR-4.9 is about exactly that.
+
+### Fixed — every IPv6 session in the matrix produced an empty capture
+
+Half the sampled matrix is IPv6. Every one of those sessions brought its tunnel
+up, generated nothing at all, and was recorded as a complete session whose
+`labels.json` said it contained 180 seconds of the traffic class it was
+sampled for. The captures held 8 to 11 packets: the IKE exchange and the
+DELETE, and no ESP.
+
+Found by counting scorable windows per class in the pilot batch. Every IPv6
+row had zero.
+
+Every traffic generator built IPv4-only command lines, and several distinct
+faults were stacked on top of each other:
+
+| Generator | Fault |
+|---|---|
+| all listeners | bound `0.0.0.0`, which is IPv4-only, so the client connected to `fd00:...` and found nothing there |
+| web, email | `http://fd00:10:10::3:8080` — an IPv6 literal in a URL needs brackets or it is not a URL with a port |
+| voip, video | same, in `rtp://` |
+| icmp | `ping` with an IPv6 `-I` source and no `-6` |
+| filexfer | `iperf3 --client <v6 literal>` resolves as IPv4 without `-6` |
+| email | swaks refuses IPv6 with "requires IO::Socket::INET6" — it tests for that module by name and will not use `IO::Socket::IP`, which the image had |
+| email | with that module installed, `IO::Socket::INET6` then failed with "Bad protocol 'tcp'": debian-slim ships no `/etc/protocols`, and `netbase` provides it |
+
+`traffic/base.py` gained `is_ipv6`, `host_for_url`, `bind_address` and
+`ping_command`, and every generator goes through them. `Dockerfile.peer` gained
+`libio-socket-inet6-perl` and `netbase`, both there solely so swaks can reach an
+IPv6 server. All seven classes verified generating real traffic over IPv6.
+
+### Added — a session that carried no traffic now fails instead of being labelled
+
+The reason the above was invisible for a whole phase. `run_for` wraps every
+generator command in `|| true`, deliberately, because several of the tools exit
+non-zero in normal operation — and the cost is that a command line that fails
+outright looks exactly like one that worked.
+
+`run_session` now counts ESP packets before writing the session and refuses
+below `max(20, duration_s // 4)`. Messaging, the sparsest class in the matrix
+at roughly one packet per second, clears that at every duration; a tunnel that
+carried nothing but its own negotiation cannot clear it at any. The check
+earned itself immediately, refusing a 25-second messaging session during the
+concurrency tests.
+
+**A capture labelled as traffic it does not contain is worse than a failed
+session**: it is training data that teaches a classifier the wrong thing, and
+nothing downstream can tell.
+
+### Added — step 8.3 can run as concurrent shards
+
+`--shard I/N` splits the configuration list so several batches can generate
+disjoint slices at once. Interleaved rather than contiguous, so no shard draws
+all the IPv6 rows and finishes hours after the others.
+
+Two things had to be fixed before that was possible, and neither was obvious
+until three shards were actually running:
+
+- **Every session created its Docker network on the same subnet.** The second
+  concurrent session got `invalid pool request: Pool overlaps with other one on
+  this address space` and failed, as did every session after it.
+  `PeerAddressing.offset()` gives each shard its own outer subnet
+  (`10.10.<i>.0/24`, `fd00:10:10:<i>::/64`); index 0 is unchanged, so a
+  single-process run and every existing manifest behave exactly as before. The
+  *protected* subnets behind each gateway are deliberately **not** offset — they
+  live in their own network namespaces and cannot collide, and holding them
+  fixed keeps the inner traffic identical across shards, so a shard index is
+  not something a classifier could learn.
+- **A failure in one shard destroyed the others' work.** The per-failure
+  cleanup called `prune_orphans()` unrestricted, which force-removes every
+  container carrying the testbed label — including the live peers of the other
+  two shards, which would then fail, prune in turn, and cascade. `prune_orphans`
+  now takes a session, and the batch names the session it is cleaning up after.
+  The startup sweep, which genuinely cannot tell an orphan from a sibling, is
+  skipped entirely when sharded.
+
+Each shard also keeps its own manifest (`manifest-I-of-N.json`), because one
+shared file rewritten after every session by three processes would have each
+erasing the other two's record of what had completed.
+
+### Added — repeat runs that are actually different sessions
+
+PRD §9.3 wants at least 200 sessions; the pairwise sample is 62
+configurations. `with_repeats` expands each configuration into *N* traffic
+runs, and `--repeats 4` reaches 248.
+
+The point of the step is that those repeats must not be copies. Only the
+messaging generator was seeded, and it was seeded with a constant — every other
+generator produced byte-identical traffic on every run, so 248 sessions would
+have been 62 distinct feature rows and 186 duplicates of them: a dataset that
+counts to 200 without knowing 200 things.
+
+`SessionConfig.seed` now reaches the generators, each repeat gets its own, and
+every generator draws within-class parameters from it: ICMP its rate and sizes,
+web its burst length and think time, VoIP its packetisation interval (20/30/40
+ms, which moves both packet rate and size), video its resolution and bitrate,
+email its attachment sizes and gaps, file transfer its offered rate. Each
+variant keeps the property that defines its class, so the seven remain as
+separable as MT-13 found them.
+
+VoIP's carrier frequency is deliberately *not* varied: a different sine tone
+through G.711 produces identical packet geometry, so it would be a label the
+features cannot see — variation that looks like diversity in the manifest and
+is not.
+
+### Added — Phase 9, Track B: the learned half
+
+Steps 9.5 through 9.12, which the previous entry recorded as "not performed"
+because they need the Phase 8 dataset. The dataset now exists.
+
+**9.5 Windowing and the split** — `track_b/windows.py`
+- LLD §7.6's fixed 10-second windows at 50% overlap, scored only above 20
+  packets. A window is turned into an `SAPair` covering just its packets and
+  handed to the existing `features.extract`, so a window's vector is computed
+  by exactly the same code as a whole capture's.
+- **Split by configuration, never by window**, which is the step's whole point.
+  Windows overlap by half, so two adjacent ones share half their packets
+  outright; a window-level split puts one in train and the other in test and
+  reports a memory test as an accuracy. It comes out high, which is why nobody
+  questions it.
+- Stricter than the plan asks: a configuration's repeat runs are held together
+  too. They share a tunnel and differ only in traffic parameters, so splitting
+  by session alone would leak the configuration even though no single session
+  spans folds.
+- Deterministic, on a SHA-256 of the configuration name rather than `hash()`,
+  which is salted per process — a split that differed between runs would make
+  "the test set" a thing that existed only in the session that trained the
+  model.
+- Stratified by traffic class, because an unstratified 20% draw over 62
+  configurations routinely leaves a class out of the test fold entirely, and a
+  macro-F1 over a fold missing a class is not PRD §8.4's number.
+
+**9.6 LightGBM baseline, 9.7 CNN** — `track_b/traffic_clf.py`
+- The CNN is LLD §7.6's architecture transcribed without changes. It returns
+  logits, not probabilities: both the training loss and step 9.8's temperature
+  scaling are defined on logits, and a model that softmaxed internally would
+  need it undone in both places.
+- Best-epoch selection uses the *calibration* fold. Choosing an epoch by test
+  macro-F1 is model selection on the test set, and the reported number stops
+  being held out the moment it decides something.
+- Class-weighted loss, because window count per class follows traffic rate: one
+  file-transfer session yields far more scorable windows than one messaging
+  session of equal length, and unweighted that accident of bitrate becomes a
+  prior.
+
+**9.8 Calibration** — `track_b/calibration.py`
+- Temperature scaling for the CNN, isotonic regression per class for LightGBM,
+  both fitted on the disjoint calibration fold.
+- Temperature scaling **cannot change a prediction** — dividing every logit by
+  the same positive number leaves the argmax alone — which is asserted, and is
+  why it is the right tool: a calibration step that also changed answers would
+  make the accuracy figure conditional on it.
+- The isotonic fit is exported as knots and applied at inference with
+  `np.interp`, so a deployment needs no scikit-learn for it. Asserted to
+  reproduce the fitted estimator exactly, because a confidence in a report that
+  differed from the confidence the model was evaluated with would make the
+  committed ECE describe something the deployment does not do.
+
+**9.9 Mode classifier** — `track_b/mode.py`
+- LLD §7.3's four features. The ordering dependency the step requires be
+  documented is in the *signature*: `predict` takes a traffic-class
+  distribution as an argument rather than computing one, so ML-1 must have run
+  first and the cycle cannot be closed backwards by a later edit.
+- Weighted by ML-1's whole distribution rather than its argmax, so an uncertain
+  classification contributes a blurred baseline instead of a confidently wrong
+  one.
+- Scored per *session*, not per window: operating mode is a property of the SA,
+  and per-window scoring would count one tunnel's thirty windows as thirty
+  independent correct answers.
+
+**9.10 Feature attribution** — `track_b/attribution.py`
+- Exact TreeSHAP, from LightGBM's own `pred_contrib=True`. The `shap` package
+  is **not** a dependency: its numba/llvmlite chain does not resolve against
+  this project's numpy on Python 3.11, and it would have been a large
+  dependency added to get a number LightGBM already computes exactly.
+- The CNN's tabular half gets occlusion attribution instead, and says so. It is
+  an approximation of a Shapley value, not one, and calling it TreeSHAP would
+  be dressing a weaker method in a stronger method's name.
+
+**9.11 Inference service** — `track_b/service.py`
+- Loads real artefacts and predicts through them, or reports UNAVAILABLE with
+  `NO_MODEL_NOTE` when the directory is empty. **Both are supported states**:
+  an air-gapped deployment handed the code and not the artefacts runs in the
+  second permanently, and has to produce a correct assessment that is honest
+  about what it could not determine.
+- LightGBM and torch are imported lazily and failures tolerated, because they
+  are the `ml` dependency group and absent from the offline image (step 11.4).
+  An artefact that will not load is logged and treated as absent — it is
+  exactly as informative as no model, and crashing over it would lose the
+  Track A analysis too.
+- `model_versions` is a content hash of the artefact, not a string written
+  beside it, so it cannot fall out of step with the bytes it names.
+- The API loads the *LightGBM* traffic classifier rather than the CNN, even
+  though the CNN scores higher: loading the CNN would make torch a runtime
+  dependency of the offline image, and LightGBM also gives exact TreeSHAP that
+  the CNN can only approximate. `metrics.json` records both so the trade is
+  visible rather than implicit.
+
+**9.4 PFS inference is now actually wired.** The previous entry recorded it as
+implemented but fed empty lists, because Track A did not extract exchange
+sizes. `ike_parser.exchange_sizes` now collects CREATE_CHILD_SA and
+INFORMATIONAL message lengths per endpoint pair off the same parsed messages —
+no second tshark run — and the pipeline hands them to `infer_pfs`.
+
+
 ### Added — step 8.5, ISCXVPN2016 ingestion
 
 `analyzer.dataset.iscx` maps the University of New Brunswick's ISCXVPN2016

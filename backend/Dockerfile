@@ -45,7 +45,15 @@ RUN echo "wireshark-common wireshark-common/install-setuid boolean false" \
       "tshark=${TSHARK_DEB_VERSION}" \
       libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
       fonts-dejavu-core \
+      libgomp1 \
  && rm -rf /var/lib/apt/lists/*
+# libgomp1 is LightGBM's OpenMP runtime, and both trained Track B models are
+# LightGBM boosters. Without it `import lightgbm` raises "libgomp.so.1: cannot
+# open shared object file" — which `track_b/service.py` catches by design, so
+# the API starts, analyses, and reports every model-backed attribute as
+# UNAVAILABLE. The reason is logged and appears nowhere in the response, so
+# from the outside a deployment missing one shared library is indistinguishable
+# from one that was shipped without models on purpose.
 
 # Fail the build, not the demo, if the installed binary is not what we pinned.
 RUN installed="$(tshark --version | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)" \
@@ -64,6 +72,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
+
+# The trained Track B artefacts, which `MODEL_DIR` points at. Without them the
+# image starts, serves, analyses and reports every model-backed attribute as
+# UNAVAILABLE -- correct behaviour for a build with no models, and completely
+# wrong for this one, which has them sitting in the repository. Nothing raises:
+# the inference service is written to degrade rather than fail, so the only
+# symptom is a demo whose traffic-classification step (PRD 16, step 2) has
+# nothing to show. Copied after `src` because they change far less often than
+# the source does.
+COPY models ./models
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 

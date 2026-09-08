@@ -62,6 +62,19 @@ def _flow(src: str, dst: str, spi: int, start_ts: float, end_ts: float) -> Flow:
     return Flow(key=key, packets=packets, start_ts=start_ts, end_ts=end_ts)
 
 
+def _encapsulated_flow(src: str, dst: str, spi: int, start_ts: float, end_ts: float) -> Flow:
+    """The same flow, but carried inside UDP/4500 as a real NAT-T tunnel is."""
+    key = FlowKey(src=src, dst=dst, spi=spi, proto="esp")
+    packets = tuple(
+        record._replace(udp_encapsulated=True)
+        for record in (
+            _esp_record(0, start_ts, src, dst, spi),
+            _esp_record(1, end_ts, src, dst, spi),
+        )
+    )
+    return Flow(key=key, packets=packets, start_ts=start_ts, end_ts=end_ts)
+
+
 def _negotiation(
     *,
     ike_version: IkeVersion = IkeVersion.IKEV2,
@@ -242,11 +255,24 @@ def test_assembly_with_no_correlated_negotiation() -> None:
         "auth_method",
         "negotiated_lifetime_s",
         "esn_negotiated",
-        "nat_traversal",
     ):
         attribute = getattr(sa, field)
         assert attribute.provenance is Provenance.UNAVAILABLE, field
         assert attribute.note
+
+
+def test_nat_traversal_is_answerable_without_any_ike() -> None:
+    """``nat_traversal`` is deliberately not in the list above.
+
+    Every other field there needs the IKE negotiation that an ESP-only capture
+    does not have. Encapsulation is a property of the ESP packets themselves,
+    so this one stays answerable -- and answering it "unavailable" alongside
+    the rest would be giving up on something plainly visible.
+    """
+    sa = assemble_security_association(_paired(), None)
+
+    assert sa.nat_traversal.provenance is Provenance.OBSERVED
+    assert sa.nat_traversal.value is False
 
 
 def test_assembly_unpaired_flow_has_no_spi_responder() -> None:
@@ -259,10 +285,30 @@ def test_assembly_unpaired_flow_has_no_spi_responder() -> None:
     assert sa.spi_initiator == "00000007"
 
 
-def test_assembly_nat_detected_observed_true() -> None:
+def test_nat_discovery_payloads_alone_do_not_report_nat_traversal() -> None:
+    """The bug this pins cost two OBSERVED falsehoods in the pilot batch.
+
+    RFC 7296 requires NAT_DETECTION_* notifies in *every* IKE_SA_INIT, so
+    reading their presence as NAT traversal reported ``true`` for both
+    reference tunnels -- on a flat /24 with no NAT in it. The discovery having
+    run is worth a note; it is not the answer.
+    """
     negotiation = _negotiation(nat_detected=True)
 
     sa = assemble_security_association(_paired(), negotiation)
+
+    assert sa.nat_traversal.provenance is Provenance.OBSERVED
+    assert sa.nat_traversal.value is False
+    assert sa.nat_traversal.note is not None
+    assert "no NAT was found" in sa.nat_traversal.note
+
+
+def test_udp_4500_encapsulation_reports_nat_traversal() -> None:
+    forward = _encapsulated_flow("10.0.0.1", "10.0.0.2", spi=1, start_ts=10.0, end_ts=12.0)
+    reverse = _encapsulated_flow("10.0.0.2", "10.0.0.1", spi=2, start_ts=10.5, end_ts=12.5)
+    pair = SAPair(forward=forward, reverse=reverse, paired=True)
+
+    sa = assemble_security_association(pair, _negotiation(nat_detected=True))
 
     assert sa.nat_traversal.provenance is Provenance.OBSERVED
     assert sa.nat_traversal.value is True

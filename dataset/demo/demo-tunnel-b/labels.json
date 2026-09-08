@@ -1,0 +1,65 @@
+{
+  "dimensions": {
+    "dh": 19,
+    "duration_s": 120,
+    "esp": "aes256gcm16",
+    "ike": "ikev2",
+    "ip": "v4",
+    "lifetime_s": 3600,
+    "mode": "tunnel",
+    "pfs": true,
+    "traffic": "voip"
+  },
+  "expected": {
+    "auth_method": "psk",
+    "dh_group": 19,
+    "encryption_alg": "aes-gcm-16",
+    "encryption_keylen": 256,
+    "ike_exchange_mode": null,
+    "ike_version": "ikev2",
+    "integrity_alg": "none",
+    "negotiated_lifetime_s": 3600,
+    "operating_mode": "tunnel",
+    "pfs_enabled": true,
+    "prf_alg": "hmac-sha256",
+    "traffic_class": "voip"
+  },
+  "generated_at": "2026-09-07T08:04:09.181084+00:00",
+  "image_versions": {
+    "curl": "7.88.1-10+deb12u15",
+    "debian": "12.15",
+    "ffmpeg": "7:5.1.9-0+deb12u1",
+    "iperf3": "3.12-1+deb12u2",
+    "sip-tester": "1:3.6.1-1+b2",
+    "strongswan-swanctl": "5.9.8-5+deb12u5",
+    "swaks": "20201014.0-2",
+    "tcpdump": "4.99.3-1"
+  },
+  "name": "demo-tunnel-b",
+  "not_observable_from_ike": {
+    "auth_method": "the IKEv2 AUTH payload sits inside the encrypted IKE_AUTH exchange (LLD 6.2)",
+    "ike_exchange_mode": "IKEv2 has no Phase 1 exchange mode",
+    "negotiated_lifetime_s": "RFC 7296 removed SA lifetime negotiation from IKEv2; each peer expires on local policy, so no negotiated value exists (LLD 6.4)",
+    "operating_mode": "not carried in any cleartext IKE field; inferred from encapsulation overhead (PRD 7, LLD 7.3)"
+  },
+  "observed": {
+    "has_ike_delete": true,
+    "ike_packets": 6,
+    "negotiated_esp": "AES_GCM_16-256",
+    "negotiated_ike": "AES_CBC-256/HMAC_SHA2_256_128/PRF_HMAC_SHA2_256/ECP_256",
+    "packet_count": 13248
+  },
+  "peers": {
+    "left": "10.10.7.2",
+    "left_ts": "192.168.10.0/24",
+    "right": "10.10.7.3",
+    "right_ts": "192.168.20.0/24",
+    "subnet": "10.10.7.0/24"
+  },
+  "proposals": {
+    "esp": "aes256gcm16-ecp256",
+    "ike": "aes256-sha256-ecp256"
+  },
+  "schema_version": "1.0",
+  "seed": 20261105
+}

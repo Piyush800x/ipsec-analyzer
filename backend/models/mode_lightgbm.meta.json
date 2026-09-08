@@ -1,0 +1,46 @@
+{
+  "labels": [
+    "transport",
+    "tunnel"
+  ],
+  "feature_names": [
+    "max_len_over_mtu",
+    "spi_pairs_per_endpoint",
+    "cleartext_ratio",
+    "modal_len_offset",
+    "min_len_offset",
+    "inner_header_bytes"
+  ],
+  "baseline": {
+    "min_len": {
+      "email/4": 68.0,
+      "email/6": 62.0,
+      "file_transfer/4": 60.0,
+      "file_transfer/6": 76.0,
+      "icmp/4": 110.0,
+      "icmp/6": 100.0,
+      "messaging/6": 70.0,
+      "video/4": 56.0,
+      "video/6": 52.0,
+      "voip/4": 70.0,
+      "voip/6": 64.0,
+      "web/4": 48.0,
+      "web/6": 48.0
+    },
+    "modal_len": {
+      "email/4": 1470.0,
+      "email/6": 1446.0,
+      "file_transfer/4": 1472.0,
+      "file_transfer/6": 1452.0,
+      "icmp/4": 110.0,
+      "icmp/6": 100.0,
+      "messaging/6": 70.0,
+      "video/4": 1240.0,
+      "video/6": 1236.0,
+      "voip/4": 294.0,
+      "voip/6": 288.0,
+      "web/4": 1472.0,
+      "web/6": 1452.0
+    }
+  }
+}

@@ -46,10 +46,48 @@ dataset/**/*.pcapng
 # even though the captures beside them are ignored. Step 8.4 puts the whole
 # tree under DVC.
 dataset/sessions/
+
+# dataset/demo/ is the exception, and it is committed on purpose.
+#
+# Step 11.5's Done-when is that the two PRD 16 demo captures are *committed*
+# and that neither appears in any training split. Both halves need this rule:
+# committed, so a clone can run the demo without a testbed and without DVC; and
+# outside dataset/sessions/, so `load_dataset` cannot walk them into a fold.
+# 6.6 MB for the two, which is the price of a demo that works from a fresh
+# clone. See backend/testbed/demo_captures.py.
+!dataset/demo/
+!dataset/demo/**
+
 backend/models/*.pkl
 backend/models/*.joblib
 backend/models/*.onnx
 backend/models/*.pt
+# The artefacts inference loads are committed, all 3.3 MB of them: the
+# LightGBM traffic and mode classifiers, their feature/label order, and the
+# isotonic calibration knots. DVC would be the right home for model weights
+# and this project documents it as such -- but no DVC remote is configured, so
+# ignoring them means a teammate's clone has no models, cannot train without
+# the 14 GB dataset that is also not in git, and silently loses every Track B
+# inference to UNAVAILABLE. A few megabytes in git beats a broken checkout.
+#
+# `traffic_cnn.pt` stays out: inference deliberately loads LightGBM rather than
+# the CNN so that torch is not a runtime dependency (see models/README.md), so
+# the checkpoint is a training artefact that no deployment reads.
+backend/models/*.pt
+
+# The batch logs of a generation run. Several megabytes of per-session INFO
+# lines whose useful content is already summarised in CHANGELOG.md.
+dataset/gen*.log
+dataset/pilot*.log
+dataset/verify.log
+dataset/train.log
+
+# metrics.json, reliability_cnn.json and external_validation.json are NOT
+# ignored, deliberately. They are the *measurements* -- what the models scored
+# and on what -- and they are what docs/model-card.md is generated from. The
+# weights are reproducible from the dataset; the record of what they achieved
+# on a particular held-out fold is not, and losing it would leave a model card
+# nobody could check.
 
 # Editors / OS
 .vscode/
@@ -60,3 +98,10 @@ desktop.ini
 
 # npm on Windows occasionally materialises its cache under the reserved name NUL
 NUL/
+
+# The retraining and regeneration logs of the second Phase 8/9 run. `gen*.log`
+# above already covers the originals; these follow the same rule — the logs are
+# provenance for a run, not for the repository.
+dataset/train2.log
+dataset/demo-gen.log
+dataset/regen-msg-*.log

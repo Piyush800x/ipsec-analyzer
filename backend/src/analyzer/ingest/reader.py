@@ -52,6 +52,14 @@ class PacketRecord(NamedTuple):
     NAT-T UDP/4500 payload). ``None`` for every non-ESP packet."""
     captured_len: int
     orig_len: int
+    udp_encapsulated: bool = False
+    """Whether this packet arrived inside UDP/4500 rather than as a bare IP
+    protocol. RFC 3948: peers switch to UDP encapsulation only when NAT
+    discovery actually finds a NAT between them, which makes this the one
+    definitive on-the-wire answer to "is NAT traversal in use". The
+    NAT_DETECTION notify payloads are not -- strongSwan sends those in every
+    IKE_SA_INIT, NAT or no NAT, so reading them as NAT-T reports it for every
+    tunnel (found while verifying step 8.1's pilot; see CHANGELOG.md)."""
 
 
 class FlowKey(NamedTuple):
@@ -261,13 +269,13 @@ def _decode(
                 _record_ike_message_id(payload[4:], ike_message_ids)
                 return PacketRecord(
                     index, ts, ip_version, src, dst, "isakmp_natt", None, None,
-                    ip_payload_len, None, caplen, orig_len,
+                    ip_payload_len, None, caplen, orig_len, True,
                 )  # fmt: skip
             if len(payload) >= ESP_HEADER_LEN:
                 esp = ESP(payload)
                 return PacketRecord(
                     index, ts, ip_version, src, dst, "esp", esp.spi, esp.seq,
-                    ip_payload_len, len(esp.data), caplen, orig_len,
+                    ip_payload_len, len(esp.data), caplen, orig_len, True,
                 )  # fmt: skip
 
     return PacketRecord(

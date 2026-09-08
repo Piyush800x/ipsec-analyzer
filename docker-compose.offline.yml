@@ -42,19 +42,27 @@ services:
       - analyzer-data:/data
     networks:
       - internal
-    command: >
-      sh -c "mkdir -p /data/captures &&
-             uv run alembic upgrade head &&
-             uv run uvicorn analyzer.api.main:create_app --factory
-                     --host 0.0.0.0 --port 8000"
+    # `alembic` and `uvicorn` directly, never `uv run`.
+    #
+    # `uv run` re-resolves the project environment before executing, which
+    # means an index lookup, which means a DNS query — and this container sits
+    # on an `internal: true` network with no route anywhere. It fails with
+    # "Could not connect, are you offline?" and the answer is yes, deliberately,
+    # which is the entire point of this file. The image already puts
+    # /app/.venv/bin on PATH (see backend/Dockerfile), so both binaries are
+    # here without it.
+    #
+    # One line, not a folded block. YAML's `>` keeps the newline before any
+    # line indented further than the first, so the previous multi-line form
+    # reached sh as two commands and the second began with `--host`.
+    command: sh -c "mkdir -p /data/captures && alembic upgrade head && exec uvicorn analyzer.api.main:create_app --factory --host 0.0.0.0 --port 8000"
     healthcheck:
       # Python rather than curl: the backend image carries an interpreter by
       # definition and need not also carry an HTTP client for its own
-      # healthcheck.
+      # healthcheck. Bare `python`, for the same reason the command above is
+      # bare `uvicorn`.
       test:
         - CMD
-        - uv
-        - run
         - python
         - -c
         - |

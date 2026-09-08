@@ -1,0 +1,349 @@
+"""Render ``models/metrics.json`` into a model card. Step 9.8's documentation half.
+
+``python -m analyzer.track_b.model_card`` reads what the training run measured
+and writes ``docs/model-card.md``: the scores, the reliability diagram step 9.8
+requires in the docs, and -- given equal weight -- what the models cannot do.
+
+Everything here is derived from the metrics file rather than typed by hand. A
+model card written from memory is a model card that describes the run someone
+remembers rather than the artefact on disk, and the numbers in it will drift
+from the model the next retrain produces. Regenerating is one command; that is
+the point.
+
+The reliability diagram is a Markdown table with a text bar rather than an
+image. It has to survive in a repository, be diffable across retrains, and be
+readable by someone comparing two runs -- a PNG is none of those, and this
+project already renders its reports from data rather than from pictures.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+BAR_WIDTH = 24
+
+PRD_MACRO_F1_TARGET = 0.85
+"""PRD section 8.4's traffic-classification target."""
+
+PRD_ECE_TARGET = 0.10
+"""PRD section 8.4's calibration target."""
+
+PRD_MODE_ACCURACY_TARGET = 0.90
+"""Step 9.9's target."""
+
+
+def _bar(value: float, width: int = BAR_WIDTH) -> str:
+    filled = round(max(0.0, min(1.0, value)) * width)
+    return "#" * filled + "." * (width - filled)
+
+
+def _verdict(value: float, target: float, *, lower_is_better: bool = False) -> str:
+    met = value <= target if lower_is_better else value >= target
+    comparison = "<=" if lower_is_better else ">="
+    return f"{'met' if met else '**NOT MET**'} ({value:.4f} {comparison} {target} is the target)"
+
+
+def _absent_classes_section(metrics: dict[str, Any]) -> list[str]:
+    """State plainly which classes the score is *not* computed over.
+
+    Every macro-F1 below is an average across the classes the model was trained
+    on. If that is fewer than PRD section 9.2's seven, the headline number means
+    something different from what a reader will assume, and the difference is
+    large: six classes handled perfectly averages to 0.857 against a
+    seven-class expectation -- above PRD section 8.4's 0.85 threshold, with a
+    seventh of the problem never attempted.
+    """
+    absent = metrics.get("classes_absent") or {}
+    if not absent:
+        return []
+
+    trained = len(metrics.get("labels", []))
+    total = trained + len(absent)
+    subject = "One class" if len(absent) == 1 else f"{len(absent)} classes"
+    verb = "was" if len(absent) == 1 else "were"
+    lines = [
+        f"> **This is a {trained}-class model, not a {total}-class one.**",
+        ">",
+        f"> Every macro-F1 below is averaged over {trained} classes. {subject} produced",
+        f"> no scorable window and {verb} never trained on or tested against:",
+        ">",
+    ]
+    for label, reason in sorted(absent.items()):
+        lines.append(f"> - **`{label}`** — {reason}")
+    lines += [
+        ">",
+        f"> A {trained}-class model that was perfect would average "
+        f"{trained}/{total} = {trained / total:.3f} against a {total}-class "
+        "expectation. Compare these numbers to the target with that in mind.",
+        "",
+    ]
+    return lines
+
+
+def _class_table(evaluation: dict[str, Any]) -> list[str]:
+    lines = ["| Class | F1 | Support (windows) |", "|---|---|---|"]
+    per_class = evaluation.get("per_class_f1", {})
+    support = evaluation.get("support", {})
+    for label in evaluation.get("labels", []):
+        lines.append(f"| {label} | {per_class.get(label, 0.0):.4f} | {support.get(label, 0)} |")
+    return lines
+
+
+def _reliability_table(bins: list[dict[str, Any]]) -> list[str]:
+    lines = [
+        "| Confidence bin | Windows | Mean confidence | Accuracy | Accuracy |",
+        "|---|---|---|---|---|",
+    ]
+    for row in bins:
+        if not row["count"]:
+            continue
+        lines.append(
+            f"| {row['bin_lower']:.1f}-{row['bin_upper']:.1f} | {row['count']} | "
+            f"{row['mean_confidence']:.3f} | {row['accuracy']:.3f} | "
+            f"`{_bar(float(row['accuracy']))}` |"
+        )
+    return lines
+
+
+def render(metrics: dict[str, Any], external: dict[str, Any] | None = None) -> str:
+    """Build the model card from a metrics document."""
+    gbm = metrics.get("lightgbm", {})
+    cnn = metrics.get("cnn", {})
+    mode = metrics.get("mode", {})
+    windows = metrics.get("windows", {})
+    configurations = metrics.get("configurations", {})
+    trained = len(metrics.get("labels", []))
+    """How many classes the model actually has. Read from the artefact rather
+    than from PRD §9.2's seven, because the Limitations section below describes
+    what the model cannot do and a hardcoded count there would be a wrong
+    answer in the one place a reader goes to find the limits."""
+
+    lines: list[str] = [
+        "# Model card — Track B",
+        "",
+        "Generated by `python -m analyzer.track_b.model_card` from",
+        "`backend/models/metrics.json`. Do not edit by hand: regenerate it, so the",
+        "numbers here always describe the artefact actually on disk.",
+        "",
+        "## What these models do",
+        "",
+        "**ML-1, inner traffic classification.** Given the packet sizes and timing of",
+        "an encrypted ESP flow, which of seven application classes is inside it. This",
+        "is the metadata-exposure measurement of PRD §4.1: it is exactly what a",
+        "passive observer of the tunnel learns without any key.",
+        "",
+        "**ML-2, operating mode.** Tunnel or transport, from encapsulation overhead and",
+        "endpoint role. It runs *after* ML-1 and takes ML-1's output as an input",
+        "feature; LLD §7.3 breaks the circularity in that direction and only that one.",
+        "",
+        "## Data",
+        "",
+        f"- Sessions: {metrics.get('sessions_total', 0)}",
+        f"- Windows: {windows.get('train', 0)} train / "
+        f"{windows.get('calibration', 0)} calibration / {windows.get('test', 0)} test",
+        f"- Configurations: {configurations.get('train', 0)} train / "
+        f"{configurations.get('calibration', 0)} calibration / "
+        f"{configurations.get('test', 0)} test",
+        f"- Tabular features: {metrics.get('n_features', 0)}",
+        "",
+        "Split **by configuration**, never by window. Windows overlap by 50%, so a",
+        "window-level split would put two halves of the same measurement on either side",
+        "of the train/test boundary and report a memory test as an accuracy. A",
+        "configuration's repeat runs are held together for the same reason one level up.",
+        "",
+    ]
+    lines += _absent_classes_section(metrics)
+    lines += [
+        "## ML-1 — LightGBM baseline (step 9.6)",
+        "",
+        f"Held-out macro-F1: **{gbm.get('test', {}).get('macro_f1', 0.0):.4f}**, "
+        f"accuracy {gbm.get('test', {}).get('accuracy', 0.0):.4f}",
+        "",
+    ]
+    lines += _class_table(gbm.get("test", {}))
+    lines += [
+        "",
+        f"ECE {gbm.get('ece_uncalibrated', 0.0):.4f} uncalibrated, "
+        f"{gbm.get('ece_calibrated', 0.0):.4f} after isotonic regression.",
+        "",
+        "## ML-1 — 1D-CNN (step 9.7)",
+        "",
+        f"Held-out macro-F1: **{cnn.get('test', {}).get('macro_f1', 0.0):.4f}**, "
+        f"accuracy {cnn.get('test', {}).get('accuracy', 0.0):.4f}",
+        "",
+    ]
+    lines += _class_table(cnn.get("test", {}))
+    lines += [
+        "",
+        "PRD §8.4 macro-F1 target: "
+        + _verdict(float(cnn.get("test", {}).get("macro_f1", 0.0)), PRD_MACRO_F1_TARGET),
+        "",
+        "## Calibration (step 9.8)",
+        "",
+        f"- CNN temperature: {cnn.get('temperature', 1.0):.4f}",
+        f"- CNN ECE: {cnn.get('ece_uncalibrated', 0.0):.4f} → {cnn.get('ece_calibrated', 0.0):.4f}",
+        f"- LightGBM ECE: {gbm.get('ece_uncalibrated', 0.0):.4f} → "
+        f"{gbm.get('ece_calibrated', 0.0):.4f}",
+        "",
+        f"PRD §8.4 ECE target: "
+        f"{_verdict(float(cnn.get('ece_calibrated', 1.0)), PRD_ECE_TARGET, lower_is_better=True)}",
+        "",
+        "### Reliability diagram — CNN, temperature-scaled, test fold",
+        "",
+        "A calibrated model's accuracy tracks its mean confidence down each row. Where",
+        "accuracy sits below confidence the model is overconfident in that band, which",
+        "is the direction that matters: it is the band where a report would overstate",
+        "what it knows.",
+        "",
+    ]
+    lines += _reliability_table(metrics.get("reliability", []))
+    lines += [
+        "",
+        "## ML-2 — operating mode (step 9.9)",
+        "",
+    ]
+    if mode.get("trained"):
+        evaluation = mode.get("test", {})
+        lines += [
+            f"Held-out accuracy: **{evaluation.get('accuracy', 0.0):.4f}** over "
+            f"{mode.get('test_sessions', 0)} held-out sessions "
+            f"({mode.get('sessions', 0)} total).",
+            "",
+            f"Step 9.9 target: "
+            f"{_verdict(float(evaluation.get('accuracy', 0.0)), PRD_MODE_ACCURACY_TARGET)}",
+            "",
+            "Features, in LLD §7.3's order of usefulness: "
+            + ", ".join(f"`{name}`" for name in mode.get("feature_names", [])),
+            "",
+            "Scored per *session*, not per window: operating mode is a property of the SA,",
+            "and scoring per window would count one tunnel's thirty windows as thirty",
+            "independent correct answers.",
+            "",
+            f"The last two features are measured against a baseline fitted from the "
+            f"training fold's *transport* sessions — {mode.get('baseline_cells', 0)} "
+            f"(traffic class, IP version) cells of median ESP geometry, stored in "
+            f"`mode_lightgbm.meta.json` and loaded with the model. See "
+            "`track_b/mode.py` for why the hand-written table it replaced could not "
+            "work: its error reached 672 bytes on an effect that is 20.",
+            "",
+            "**Why this score is what it is.** `min_len_offset` is close to a direct "
+            "measurement of the thing being classified — tunnel mode adds a 20- or "
+            "40-byte inner header to every packet, and the smallest packets in a flow "
+            "are the ones far enough below the path MTU to show it rather than absorb "
+            "it. On this testbed, where every session is one clean SA pair between two "
+            "containers with a fixed MTU, that separates completely. Real traffic will "
+            "not be as clean: several SAs, varying path MTUs, fragmentation, and a "
+            "baseline fitted to generators that are not these. Read this the same way "
+            "as ML-1's figure, below.",
+        ]
+    else:
+        lines += [f"**Not trained.** {mode.get('reason', 'no reason recorded')}"]
+
+    lines += ["", "## External validation (step 9.12)", ""]
+    if external and external.get("gap") is not None:
+        lines += [
+            f"- Internal macro-F1 (this testbed): {external['internal_macro_f1']:.4f}",
+            f"- External macro-F1 (ISCXVPN2016): {external['external_macro_f1']:.4f}",
+            f"- **Gap: {external['gap']:.4f}**",
+            "",
+            str(external.get("interpretation", "")),
+        ]
+    else:
+        lines += [
+            "**Not measured.** ISCXVPN2016 has not been downloaded — it needs a",
+            "registration form and several gigabytes. The adapter (step 8.5) and the",
+            "evaluation (`analyzer.track_b.external_eval`) are implemented and tested",
+            "against synthetic captures shaped like that corpus, so the measurement is",
+            "one command away from anyone who has the data. Until then this project has",
+            "**no evidence that these models generalise beyond its own testbed**, and",
+            "the internal scores above should be read with that in mind.",
+        ]
+
+    lines += [
+        "",
+        "## How to read a near-perfect score",
+        "",
+        "The numbers above are high enough to be suspicious, and the suspicion is",
+        "warranted. Two things were checked before publishing them.",
+        "",
+        "**It is not leakage.** The train, calibration and test folds hold disjoint",
+        "sets of *configurations*, verified directly rather than assumed: no",
+        "configuration appears in two folds and no session's windows span a fold",
+        "boundary. `tests/test_track_b_dataset.py` asserts both properties.",
+        "",
+        "**It is a nearly separable task.** This testbed's seven classes are produced",
+        "by different tools at rates differing by orders of magnitude, and they",
+        "separate on single features. Mean `packet_count` per 10-second window on the",
+        "test fold runs icmp ~105, email ~307, voip ~902, video ~1824, web ~4627,",
+        "file_transfer ~18071; `up_down_byte_ratio` runs web 0.03, icmp and voip 1.0,",
+        "email ~31, file_transfer ~812, video ~3833. A one-feature decision stump",
+        "separates most of them.",
+        "",
+        "So the score measures **how distinct this testbed's generators are**, not how",
+        "well the model would classify real traffic. The only measurement that would",
+        "answer the second question is the external validation above, and it has not",
+        "been run. Treat these figures as a lower bound on the difficulty of the task",
+        "as posed, not as evidence of generalisation.",
+        "",
+        "**The same reading applies to ML-2**, for a different reason: its strongest",
+        "feature is close to a direct measurement of the inner header rather than a",
+        "learned proxy for it. See that section above.",
+        "",
+        "## Limitations",
+        "",
+        "- **Synthetic traffic.** Every training capture was generated by this project's",
+        "  own generators against its own tunnels. Real traffic of the same class will",
+        "  differ, and the external validation above is what would measure by how much.",
+        "- **The label is the generator, not the application.** A `video` window is one",
+        "  where this testbed ran ffmpeg, not one where a person watched something.",
+        # Written from the trained label count, not from PRD §9.2's seven. A
+        # card that says "seven classes" on a six-class model is wrong in the
+        # one section a reader consults to find out what the model cannot do.
+        f'- **{trained} classes, closed set.** There is no "other". Traffic unlike',
+        "  anything in the matrix will be forced into the nearest class, with a",
+        f"  confidence that reflects the model's certainty among those {trained} and",
+        "  not its certainty that the answer is among them at all.",
+        "- **ML-2 depends on ML-1.** A wrong traffic class feeds a wrong baseline into",
+        "  the mode classifier's length-offset features. The dependency is deliberate",
+        "  and documented (LLD §7.3), but it means ML-2's errors are correlated with",
+        "  ML-1's.",
+        "- **ML-2's baseline is fitted to this testbed.** The per-class geometry the",
+        "  mode classifier measures its offsets against is the median of this",
+        "  corpus's transport sessions, so it inherits every way in which these",
+        "  generators differ from real traffic. Step 9.12 is the measurement that",
+        "  would say by how much.",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--models-dir", type=Path, default=Path("models"))
+    parser.add_argument("--out", type=Path, default=Path("../docs/model-card.md"))
+    args = parser.parse_args(argv)
+
+    metrics_path = args.models_dir / "metrics.json"
+    if not metrics_path.exists():
+        sys.stderr.write(f"no metrics at {metrics_path}; run track_b.train first\n")
+        return 1
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+
+    external_path = args.models_dir / "external_validation.json"
+    external = (
+        json.loads(external_path.read_text(encoding="utf-8")) if external_path.exists() else None
+    )
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(render(metrics, external), encoding="utf-8")
+    sys.stdout.write(f"model card written to {args.out}\n")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

@@ -63,13 +63,18 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-12 | Testbed builds a real kernel-ESP tunnel | 0.1, 0.2, 2.1 | 2026-09-04 | Pass |
 | MT-13 | The seven traffic classes look different | 2.6 | 2026-09-04 | Pass |
 | MT-14 | A batch resumes where it was killed | 2.10 | 2026-09-04 | Pass |
-| MT-15 | Reader packet count matches tshark on a real capture | 3.2 | — | **Not run** |
-| MT-16 | Track A matches labels.json on a real testbed capture | 4.8 | — | **Not run** |
+| MT-15 | Reader packet count matches tshark on a real capture | 3.2 | 2026-09-07 | Pass (4 captures, exact) |
+| MT-16 | Track A matches labels.json on a real testbed capture | 4.8 | 2026-09-07 | Pass (248 sessions, 0 mismatch) |
 | MT-17 | Both reports read correctly to their audience | 10.2, 10.3 | 2026-09-05 | Pass |
-| MT-18 | The offline stack runs with no outbound network | 11.4 | — | **Not run** |
-| MT-19 | Demo rehearsal, three clean runs | 11.6 | — | **Not run** |
+| MT-18 | The offline stack runs with no outbound network | 11.4 | 2026-09-07 | Pass |
+| MT-19 | Demo rehearsal, three clean runs | 11.6 | 2026-09-07 | Pass (3/3, 21s) |
 | MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 | Pass (both) |
 | MT-21 | A real capture goes through the running API end to end | 6.7, 10.4 | 2026-09-06 | Pass |
+| MT-22 | Every traffic class carries real traffic over IPv6 | 2.6, 8.3 | 2026-09-07 | Pass |
+| MT-23 | Concurrent shards produce one complete, disjoint dataset | 8.3 | 2026-09-07 | Pass |
+| MT-24 | The model card describes the artefacts actually on disk | 9.8 | 2026-09-07 | Pass |
+| MT-25 | A tunnel still rekeys, and does it on time | 9.3 | 2026-09-07 | Pass |
+| MT-26 | The backend image actually carries the trained models | 11.4 | 2026-09-07 | Pass |
 
 ---
 
@@ -618,10 +623,26 @@ classic pcap — `ingest/reader.py` only reads classic pcap, matching what
 `testbed/capture.py`'s `tcpdump -w` produces, and will raise `IngestError`
 rather than silently misreport on anything else.
 
-> Not yet run. Needs Docker and a kernel with XFRM (same prerequisites as
-> MT-12) plus a `tshark` binary on the host, none of which were available
-> where Phase 3 was implemented. Run this before treating step 3.2 as more
-> than "passes its own tests."
+**Running it without tshark on the host.** The pinned tshark lives in the
+backend image (MT-02), so the comparison can be made against *that* binary
+rather than whatever the host happens to have — which is stricter, since the
+pinned version is the one Track A actually parses:
+
+```bash
+docker run --rm -v "$PWD/dataset:/data" --entrypoint sh \n  ipsec-analyzer-backend:0.1.0 \n  -c "tshark -r /data/sessions/weak-reference/capture.pcap 2>/dev/null | wc -l"
+```
+
+> Last verified 2026-09-07 · Pass, against tshark 4.4.18 in
+> `ipsec-analyzer-backend:0.1.0`, on four real testbed captures spanning both
+> IP versions, both IKE versions and three cipher suites. Every count matched
+> exactly:
+>
+> | capture | tshark | reader |
+> |---|---|---|
+> | `weak-reference` (IKEv1, 3DES, v4) | 7120 | 7120 |
+> | `hardened-reference` (IKEv2, AES-GCM, v4) | 7123 | 7123 |
+> | `s003-…-tunnel-v6-messaging` (IKEv1, AES-CBC, v6) | 678 | 678 |
+> | `s019-…-tunnel-v6-messaging` (IKEv2, 3DES, v6) | 684 | 684 |
 
 ---
 
@@ -736,9 +757,28 @@ and NFR-6 is unproven.
 
 Then upload a capture through the UI and confirm an assessment appears.
 
-> Not yet run. Needs Docker, which was not available where Phase 11 was
-> implemented. The compose file and both Dockerfiles exist and the frontend's
-> standalone build is verified; the stack has never been started.
+> Last verified 2026-09-07 - Pass. Both services healthy; the backend's
+> `create_connection(('1.1.1.1', 53))` failed with `OSError: [Errno 101]
+> Network is unreachable`, and <http://localhost:3000> served HTTP 200.
+>
+> **The first run of this found four defects, none of which any test could
+> see.** Every one produced a stack that came up and looked right:
+>
+> 1. `frontend/` had no `.dockerignore`, so the build context included a
+>    directory npm had created under the reserved Windows name `NUL`. The
+>    daemon cannot read that path, so the frontend image would not build at all
+>    (`error from sender: open frontend\NUL: Incorrect function`) - and because
+>    `NUL/` is gitignored, it is invisible in `git status`.
+> 2. The compose `command:` ran `uv run alembic` and `uv run uvicorn`. `uv run`
+>    re-resolves the environment, which needs an index, which needs DNS - on an
+>    `internal: true` network. The backend died with "Could not connect, are you
+>    offline?", which was the correct answer to the wrong question.
+> 3. That `command:` was a YAML `>` folded block whose continuation lines were
+>    indented further than the first, so the newline was preserved and `sh`
+>    received two commands. The second began `--host`.
+> 4. `libgomp1` was missing from the backend image, so `import lightgbm` failed
+>    and **both** trained models were skipped - see MT-26, which exists because
+>    of exactly this class of failure.
 
 ---
 
@@ -754,8 +794,37 @@ download the executive report. Time it against the two-minute target.
 **Expect** three consecutive runs with no restarts, no stalls on the progress
 bar, and the comparison view rendering both tunnels side by side.
 
-> Not yet run. Blocked on MT-18 (Docker) and on step 11.5's demo captures,
-> which need the testbed.
+**`scripts/demo_rehearsal.py` runs the sequence and asserts on it**, rather
+than timing a person clicking. It checks the thing each step is on stage to
+show - that tunnel A's findings are not empty and B's list is shorter, that B
+scores *higher*, that the classifier returned a class, that the report really
+is a PDF - so a run that is fast and wrong fails instead of passing.
+
+```bash
+docker compose -f docker-compose.offline.yml up -d --build
+python scripts/demo_rehearsal.py --runs 3
+```
+
+> Last verified 2026-09-07 - **3/3 clean, 21.1-21.2 s each** against the
+> two-minute target, and identical to the finding across all three runs:
+>
+> | step | result | |
+> |---|---|---|
+> | 1. tunnel A (weak) | score **25**, 7 findings, 1 critical | 8.4 s |
+> | 2. traffic classifier | **voip at confidence 1.0, exposure 100** | 0.0 s |
+> | 3. tunnel B (hardened) | score **80** (+55), 2 findings | 8.4 s |
+> | 3b. comparison | delta 55, 5 findings only in A | 2.1 s |
+> | 4. executive report | 17 KB PDF | 2.4 s |
+>
+> The three runs agreeing exactly is NFR-4 visible from outside: the engine is
+> a pure function of its inputs, so the same capture twice is the same
+> assessment twice.
+>
+> **What still needs a person.** This harness drives the API, not the browser.
+> It does not prove the dashboard *renders* - that the threat matrix lights up,
+> that the progress bar moves rather than jumping from 0 to 100, that the
+> comparison view puts the two tunnels side by side. Walk those by eye at
+> <http://localhost:3000> before the demo; they are what the audience sees.
 
 ---
 
@@ -908,3 +977,245 @@ Copy this. Keep it short enough that someone will actually run it.
 
 Then add a row to the Status table, and note the new check in
 [CHANGELOG.md](CHANGELOG.md) under the step that introduced it.
+
+---
+
+## MT-22 — Every traffic class carries real traffic over IPv6
+
+**Proves** the IPv6 generator fix. Half the sampled matrix is IPv6, and for
+Phases 2 through 8 every one of those sessions brought its tunnel up, generated
+nothing, and was written with a `labels.json` claiming 90 seconds of its class.
+The captures held eight to eleven packets: the IKE exchange and the DELETE.
+
+The automated tests catch the *command lines* — `tests/test_testbed_traffic.py`
+asserts that no listener binds `0.0.0.0` and no IPv6 literal appears unbracketed
+in a URL, for every class in both families. They cannot catch a tool that
+accepts its arguments and still sends nothing, which is why a person runs this.
+
+```bash
+cd backend
+uv run python - <<'PY'
+import asyncio
+from pathlib import Path
+from testbed.config import IpVersion
+from testbed.orchestrator import run_session
+from testbed.sampler import load_matrix, sample_configs
+
+out = Path("/tmp/mt22")
+configs = {c.traffic: c for c in sample_configs(load_matrix()) if c.ip is IpVersion.V6}
+for traffic, cfg in sorted(configs.items(), key=lambda kv: kv[0].value):
+    session = cfg.model_copy(update={"duration_s": 40, "address_index": 5})
+    try:
+        result = asyncio.run(run_session(session, out))
+        print(f"{traffic.value:14s} {result.packet_count:7d} packets")
+    except Exception as exc:
+        print(f"{traffic.value:14s} FAILED: {exc}")
+PY
+```
+
+**Expect** every class in the hundreds or thousands, never in the tens. A count
+below the ESP floor now raises rather than being written, so a regression shows
+as `FAILED: the tunnel came up but carried almost nothing` — but read the
+numbers anyway. A class that fell from thousands to fifty would clear the floor
+and still be broken.
+
+> Last verified 2026-09-07 · icmp 410, messaging 32, file_transfer 56201,
+> web 21873, video 4969, voip 3976 over 40s; email 705 · Pass · email needed
+> `libio-socket-inet6-perl` and `netbase` in the peer image before swaks would
+> speak IPv6 at all.
+
+---
+
+## MT-23 — Concurrent shards produce one complete, disjoint dataset
+
+**Proves** step 8.3's sharding. Several processes writing into one directory,
+each on its own Docker subnet and its own manifest, must between them produce
+every configuration exactly once. The two failure modes are silent and opposite:
+a session generated twice wastes an hour, one generated never leaves a hole that
+surfaces only as a missing configuration during training.
+
+```bash
+cd backend
+for i in 1 2 3 4 5 6; do
+  uv run python -m testbed.batch ../dataset/sessions \
+      --repeats 4 --duration 90 --shard $i/6 > ../dataset/gen6-$i.log 2>&1 &
+done
+wait
+
+uv run python - <<'PY'
+from pathlib import Path
+from testbed.sampler import load_matrix, sample_configs, with_repeats
+
+expected = {c.name for c in with_repeats(sample_configs(load_matrix()), 4)}
+on_disk = {p.name for p in Path("../dataset/sessions").iterdir() if p.is_dir()}
+print(f"expected {len(expected)}, on disk {len(on_disk)}")
+print("missing:", sorted(expected - on_disk)[:10])
+print("unexpected:", sorted(on_disk - expected)[:10])
+PY
+```
+
+**Expect** `unexpected` empty, and `missing` empty or a short list the logs
+record as failed — `grep failed: ../dataset/gen6-*.log` — rather than sessions
+that vanished without a reason.
+
+Watch for `Pool overlaps with other one on this address space` in any log. That
+means two shards drew the same subnet, which `--shard I/N` setting
+`address_index` to `I-1` should make impossible, and it fails every session in
+the losing shard.
+
+**If changing the shard count**, seed the new manifests first. They are named
+`manifest-I-of-N.json`, so going from 3 shards to 6 starts with empty manifests
+and regenerates everything already done.
+
+> Last verified 2026-09-07 · 6 shards, 248/248 sessions, 0 failures, 14 GB ·
+> Pass · shards completed in 1435–1640s each having skipped 26–28 seeded
+> sessions apiece.
+
+---
+
+## MT-24 — The model card describes the artefacts actually on disk
+
+**Proves** step 9.8's documentation half. `docs/model-card.md` is generated from
+`models/metrics.json`, and the reason it is generated rather than written is
+that a hand-written card describes the run someone remembers.
+
+```bash
+cd backend
+uv run python -m analyzer.track_b.model_card
+git diff --stat ../docs/model-card.md
+```
+
+**Expect** no diff. A diff means the card in git was written against different
+artefacts than the ones in `models/`, so the numbers a reader would quote are
+not the numbers the deployment produces.
+
+Then read it, and check two things by eye:
+
+1. **The class count.** If the card opens with "This is an N-class model, not a
+   7-class one", every macro-F1 in it is averaged over N classes and must not be
+   compared to PRD §8.4's target as though it covered seven. Six classes handled
+   perfectly averages 0.857, which clears a 0.85 threshold while a seventh of
+   the problem was never attempted.
+2. **The Limitations section** is still true of this build, and any target
+   marked `**NOT MET**` is recorded as unmet in [CHANGELOG.md](CHANGELOG.md)
+   rather than only here.
+
+---
+
+## MT-25 — A tunnel still rekeys, and does it on time
+
+**Proves** step 9.3, and guards a failure no automated test can see: a change to
+the lifetime settings that stops SAs rekeying at all.
+
+Nothing in the sampled matrix demonstrates this. Every matrix row runs a
+3600-second lifetime for 90 seconds, so no dataset session ever rekeys inside
+its own capture — right for a dataset, useless for this measurement.
+`testbed/rekey_probe.py` exists to make it happen.
+
+```bash
+cd backend
+uv run python -m testbed.rekey_probe /tmp/mt25
+
+uv run python - <<'PY'
+from pathlib import Path
+from analyzer.ingest.flow import assemble_flows
+from analyzer.ingest.reader import read_packets
+from analyzer.track_b import replay
+
+result = read_packets(Path("/tmp/mt25/rekey-300s/capture.pcap"))
+series = replay.spi_series(assemble_flows(result.packets))
+for (src, dst), entries in series.items():
+    base = entries[0][1]
+    print(f"{src} -> {dst}: offsets {[round(ts - base, 1) for _, ts in entries]}")
+    print(f"   observed_rekey_s = {replay.observed_rekey_s(entries).value}")
+PY
+```
+
+**Expect** at least three SPIs per direction, at offsets near 0, 290 and 580,
+and an `observed_rekey_s` within 10% of 300. Two rotations rather than one is
+the point: a single rotation cannot distinguish "rekeyed on time" from "rekeyed
+once, for some other reason".
+
+**Two failures to watch for**, neither of which looks like a failure:
+
+- **Two SPIs and a capture that stops dead at the rekey moment.** `over_time` is
+  too small for the rekey to complete — strongSwan *deletes* an SA that has not
+  rekeyed within `rekey_time + over_time`, so a zero window expires it at the
+  instant it tries. The session is still recorded as successful, and the traffic
+  before the expiry is real, so the ESP-count guard does not catch it.
+- **An interval of 0 at 0.95 confidence.** The SPI series was built from one
+  `SAPair`'s two directions, which come up together, rather than across
+  generations. See `replay.spi_series`.
+
+> Last verified 2026-09-07 · 700s capture, 55288 packets, SPI offsets
+> 0/288.5/578.5 in both directions, observed_rekey_s 290 vs 300 configured
+> (3.3%) · Pass
+
+---
+
+## MT-26 — The backend image actually carries the trained models
+
+**Proves** that step 11.4's image can do what the demo needs it to do, and
+guards a failure with **no error anywhere in it**.
+
+`docker-compose.offline.yml` sets `MODEL_DIR=/app/models`. `track_b/service.py`
+is deliberately written to degrade rather than fail: a missing model directory
+produces `UNAVAILABLE` with a reason on every model-backed attribute and the
+analysis completes normally. That is exactly right for a deployment with no
+models, and catastrophic for this one, which has them committed — the image
+builds clean, starts clean, serves clean, and PRD §16's second demo step has
+nothing to show.
+
+`backend/Dockerfile` never had a `COPY models` at all — written before the
+artefacts were committed, and so correct when written and silently wrong
+afterwards. No test that does not open the image could catch it.
+
+```bash
+cd backend
+docker build -t ipsec-analyzer-backend:0.1.0 .
+docker run --rm --entrypoint sh ipsec-analyzer-backend:0.1.0   -c "ls -1 /app/models"
+```
+
+**Expect** every *tracked* artefact in `backend/models/` to be listed — in
+particular `traffic_lightgbm.txt`, `mode_lightgbm.txt`, `calibration.json` and
+their `.meta.json` files. Eight files.
+
+`traffic_cnn.pt` should **not** appear, and its absence is not a fault: the CNN
+is a training artefact, inference loads the LightGBM booster so that torch is
+not a runtime dependency, and it is gitignored. A shorter listing than eight
+means `.dockerignore` is eating something that matters.
+
+Then confirm the running stack agrees, which is the part a directory listing
+cannot tell you:
+
+```bash
+docker compose -f docker-compose.offline.yml up --build -d
+python scripts/demo_rehearsal.py --runs 1
+```
+
+**Expect** step 2 of the rehearsal to name a traffic class and a confidence.
+If it reports "the traffic classifier identified no inner traffic class", the
+models are not reaching the running process even if they are in the image —
+check `MODEL_DIR` against the path they were copied to.
+
+> Last verified 2026-09-07 - Pass, after three separate fixes. All eight
+> tracked artefacts are in `/app/models`, and the rehearsal reports `voip at
+> confidence 1.0`.
+>
+> **It took three fixes because there were three independent breaks, and each
+> produced the same silent symptom.** Any one of them alone would have left the
+> demo with nothing to show at step 2:
+>
+> 1. `backend/Dockerfile` had no `COPY models`, so the directory did not exist.
+> 2. `libgomp1` was missing, so LightGBM could not import and both models were
+>    skipped even once the files were there.
+> 3. `JobRunner` never passed `Settings.model_dir` to the pipeline, so even a
+>    perfect image analysed every capture model-free. This one was not specific
+>    to the container: **`MODEL_DIR` had never worked on any deployment**, and
+>    `tests/test_api_jobs.py::test_the_configured_model_dir_reaches_the_pipeline`
+>    now holds that path open.
+>
+> `models/*.pt` staying out of the image is **correct**, not a fourth break:
+> `traffic_cnn.pt` is the CNN, inference loads the LightGBM booster so that
+> torch is not a runtime dependency, and the file is gitignored — a clean clone
+> does not have it either. The listing below is what a clean clone produces.
