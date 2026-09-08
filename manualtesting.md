@@ -75,6 +75,7 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-24 | The model card describes the artefacts actually on disk | 9.8 | 2026-09-07 | Pass |
 | MT-25 | A tunnel still rekeys, and does it on time | 9.3 | 2026-09-07 | Pass |
 | MT-26 | The backend image actually carries the trained models | 11.4 | 2026-09-07 | Pass |
+| MT-27 | Upload → click capture → analyse → assessment, in a browser | 7.5, 7.6 | 2026-09-08 | Pass (curl-verified; browser walkthrough still owed) |
 
 ---
 
@@ -1219,3 +1220,35 @@ check `MODEL_DIR` against the path they were copied to.
 > `traffic_cnn.pt` is the CNN, inference loads the LightGBM booster so that
 > torch is not a runtime dependency, and the file is gitignored — a clean clone
 > does not have it either. The listing below is what a clean clone produces.
+
+---
+
+## MT-27 — Upload → click capture → analyse → assessment, in a browser
+
+**Proves** the path a real user takes actually reaches the API, which no
+automated test in this repo checked. It caught a real break: `/` has linked
+each row to `/captures/{id}` since step 7.5, and that route did not exist —
+every click 404'd, so the upload-and-analyse flow, the demo's entry point,
+was unreachable from the UI despite `AnalyzeButton` and `RunProgress` being
+fully built and wired underneath.
+
+```bash
+cd backend && uv run uvicorn analyzer.api.main:create_app --factory --port 8000
+cd frontend && npm run dev        # no USE_FIXTURES -- this exercises the live API
+```
+
+In a browser: drop a `.pcap` on `/`, click the row it appears as, click
+**Analyse this capture**, watch the stage list move, then follow **View the
+assessment** when it appears.
+
+**Expect** the detail page to render (not 404), the progress bar to move
+through `ingest → track_a → track_b → assess` rather than jump 0→100, and the
+final link to land on a populated assessment overview.
+
+> Last verified 2026-09-08 - the fix (`app/captures/[id]/page.tsx` plus
+> `getCapture()`) was verified over HTTP: capture detail 404 → 200, `POST
+> .../analyze` reaches `succeeded`, the returned `assessmentId` renders at
+> `/assessments/{id}` (200). `tsc --noEmit` and `eslint` both clean. **The
+> actual browser walkthrough — watching the progress bar move rather than
+> trusting the API sequence it is built from — has not been done and still
+> needs a person**, same gap MT-19 already named for the dashboard generally.
