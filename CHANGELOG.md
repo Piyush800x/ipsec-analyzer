@@ -17,6 +17,27 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Fixed — the messaging peer's `TCP_NODELAY` failed on Linux CI
+
+`_Peer.__init__` disabled Nagle unconditionally. `test_messaging_peer.py`'s
+`test_a_periodic_stanza_reschedules_itself` drives the class through
+`socket.socketpair()`, which returns an **AF_UNIX** pair on Linux — where an
+`IPPROTO_TCP` option is not redundant but rejected, `OSError: [Errno 95]
+Operation not supported`. Windows emulates `socketpair()` over loopback TCP and
+accepts the call, so the suite was green on the development machine and red in
+GitHub Actions, on a line that had nothing to do with what the test asserts.
+
+The `setsockopt` is now guarded on `sock.family in (AF_INET, AF_INET6)`, which
+is the real precondition: Nagle is a TCP algorithm and there is nothing to
+disable on a Unix socket. `serve()` and `send()` both build `AF_INET`/`AF_INET6`
+sockets, so generated traffic keeps one stanza per segment — the property the
+guard had to preserve, since coalescing a burst would flatten the shape the
+`messaging` class exists to produce.
+
+Verified in both directions against stub sockets: an AF_UNIX-family socket whose
+`setsockopt` raises `OSError(95)` now constructs, and an `AF_INET` one still
+receives exactly `(IPPROTO_TCP, TCP_NODELAY, 1)`.
+
 ### Added — Phase 11 finished: 11.5 and 11.6 land, and MT-08/09 are all that is left
 
 **11.5 Demo captures** — `testbed/demo_captures.py`, `dataset/demo/`

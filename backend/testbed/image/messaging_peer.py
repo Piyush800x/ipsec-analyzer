@@ -180,7 +180,14 @@ class _Peer:
         # write over a TLS connection that has already disabled Nagle; leaving
         # it on here would coalesce a burst into a single packet and destroy
         # the shape this module is generating.
-        self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        #
+        # Guarded on the family because Nagle is a TCP algorithm: on the
+        # AF_UNIX pair the tests drive this class through, IPPROTO_TCP options
+        # are not merely redundant but rejected (ENOTSUP on Linux). Windows
+        # emulates socketpair() over loopback TCP and accepts the call, which
+        # is why an unguarded setsockopt passes locally and fails in CI.
+        if self._sock.family in (socket.AF_INET, socket.AF_INET6):
+            self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     # -- scheduling ----------------------------------------------------------
 
