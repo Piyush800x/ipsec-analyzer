@@ -8,7 +8,13 @@
  * flag is what kept that possible.
  */
 
-import type { Assessment, CapturePage, ComparisonResponse, RunSummary } from "./types";
+import type {
+  Assessment,
+  CapturePage,
+  CaptureSummary,
+  ComparisonResponse,
+  RunSummary,
+} from "./types";
 import weakFixture from "./fixtures/assessment_weak.json";
 import strongFixture from "./fixtures/assessment_strong.json";
 
@@ -78,6 +84,14 @@ export async function listCaptures(limit = 50, offset = 0): Promise<CapturePage>
     return { items: [], total: 0, limit, offset };
   }
   return apiFetch<CapturePage>(`/captures?limit=${limit}&offset=${offset}`);
+}
+
+/** Backs the capture detail page, where a capture is analysed. Step 7.5. */
+export async function getCapture(id: string): Promise<CaptureSummary> {
+  if (USE_FIXTURES) {
+    throw new ApiError(404, "Captures are not served from fixtures");
+  }
+  return apiFetch<CaptureSummary>(`/captures/${id}`);
 }
 
 export async function getRun(id: string): Promise<RunSummary> {

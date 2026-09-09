@@ -17,7 +17,28 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
-### Fixed — the messaging peer's `TCP_NODELAY` failed on Linux CI
+### Fixed — clicking an uploaded capture 404'd; `/captures/[id]` did not exist
+
+Found by hand: uploading a PCAP through the dashboard and clicking its row
+produced a plain `GET /captures/{id} 404` from Next.js itself, before the
+request ever reached the API.
+
+Step 7.5/7.6's pieces were all built and individually correct —
+`AnalyzeButton` posts to `/captures/{id}/analyze`, `RunProgress` consumes the
+SSE stream and hands off to the resulting assessment — but no page mounted
+them. The capture list on `/` has linked to `/captures/${capture.id}` since
+7.5 landed; that route was never created, so every capture was a dead end
+after upload, and the analyze flow — the demo's actual entry point — could not
+be reached from the UI at all despite being fully wired underneath.
+
+Added `app/captures/[id]/page.tsx` (summary card plus `AnalyzeButton`) and
+`getCapture()` in `lib/api.ts`, the one API-client function step 7.5 was
+missing (`GET /captures/{id}` already existed on the backend, per 6.4).
+
+Verified against the running stack, not just a render: uploaded capture →
+detail page (200, was 404) → `POST .../analyze` → run reaches `succeeded` →
+returned `assessmentId` renders at `/assessments/{id}` (200). `tsc --noEmit`
+and `eslint` both clean.
 
 `_Peer.__init__` disabled Nagle unconditionally. `test_messaging_peer.py`'s
 `test_a_periodic_stanza_reschedules_itself` drives the class through
