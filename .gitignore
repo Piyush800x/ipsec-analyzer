@@ -36,7 +36,6 @@ data/
 *.sqlite
 *.sqlite3
 backend/data/
-captures/
 
 # Datasets and model artefacts are DVC-tracked, not git-tracked
 dataset/**/*.pcap
