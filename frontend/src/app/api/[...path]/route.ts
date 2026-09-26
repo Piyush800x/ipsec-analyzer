@@ -15,6 +15,11 @@ import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// On Vercel, this route's own duration bounds how long the /runs/{id}/events
+// SSE passthrough can stay open before the platform cuts the function off
+// mid-stream. Raise per plan: Hobby caps at 60s regardless of this value: Pro
+// or higher is required for a real analysis to run to completion.
+export const maxDuration = 300;
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:8000";
 
