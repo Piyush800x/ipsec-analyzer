@@ -17,6 +17,77 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Fixed — PDF reports, and emailing them, work on Windows without GTK
+
+**The bug.** On Windows, giving an email address on the capture page and
+pressing **Analyse this capture** failed at once with a 503 telling the
+analyst to install the GTK3 runtime. The route refused the address before the
+run because the attachments are PDFs, and WeasyPrint cannot load without
+Pango, Cairo and GObject, which are system libraries that uv cannot install
+and stock Windows never has. The download buttons had the same 503. So both
+PDF features worked only on Linux or in Docker.
+
+**The fix: a second, pure-Python PDF engine.** `render_pdf` still uses
+WeasyPrint wherever its libraries load (the Docker image, Linux with Pango),
+so that output is unchanged. Everywhere else it renders the same HTML with
+**xhtml2pdf** (over reportlab). Both are wheels on Windows and Linux, so a
+plain `uv sync` is enough. Nothing is installed on the system.
+
+- `templates/portable.css` is its stylesheet. xhtml2pdf implements a CSS 2.1
+  subset: no flex, no `@page` margin boxes, no `string-set`, no
+  `counter(pages)`. The running header and the `Page N of M` footer are
+  xhtml2pdf frames, added to the markup at render time, so the templates
+  WeasyPrint reads are untouched.
+- The font is Bitstream Vera, which ships **inside the reportlab wheel**, so
+  output is identical on both OSes. DejaVu Sans, which `base.css` names, is
+  Vera extended. Every non-ASCII character in the templates, policy and
+  report code was checked against Vera. Only `→` is missing, and it is
+  substituted with `->`. A test now fails if a report ever prints a
+  character that Vera cannot.
+- Borders were dropped from `.score-band` and `.finding` in this stylesheet.
+  xhtml2pdf draws a container's border around each child block separately,
+  which turned the score band into six boxes. Found by reading the rendered
+  PDFs, not by any test.
+- The server logs `PORTABLE_ENGINE_NOTICE` once, the first time it falls
+  back. It is an operator note with the GTK/Pango install for WeasyPrint's
+  layout, not an error.
+- Removed as unreachable: `PdfBackendUnavailableError`, `PDF_BACKEND_HINT`,
+  `pdf_backend_available()`, the analyze route's `capability: "pdf"` 503 and
+  the report route's 503. `pdf_engine()` reports which engine is in use.
+  `PdfRenderError` covers an engine that runs but reports failure, and the
+  mailer turns it into its own message.
+
+Tests: the PDF tests in `test_reports.py` now run once **per engine**.
+WeasyPrint runs where available; xhtml2pdf is forced on machines that have
+WeasyPrint, so Linux CI exercises the fallback too. They no longer skip on
+Windows. New: `test_the_pdf_carries_the_report_content` (text-layer check
+via pypdf, a new dev dependency), the glyph-coverage test,
+`test_report_downloads_as_pdf_without_weasyprint`, and
+`test_an_address_is_accepted_and_emailed_without_weasyprint`, which is the
+reported bug end to end. The two 503 tests were removed along with the
+behaviour. Verified on a live server as well (MT-20 Windows column, MT-30).
+
+#### Deviations
+
+- Implementation plan step 10.1 says "Jinja2 templates plus WeasyPrint CSS".
+  WeasyPrint remains the primary engine, but it is no longer the only one.
+  The PDF a reader gets now depends on the machine: the content is the same,
+  but the typesetting differs (stacked score block, Vera instead of DejaVu,
+  proportional font in the evidence blocks because reportlab's built-in
+  Courier covers WinAnsi only). NFR-4's byte-identical requirement is on the
+  assessment JSON, not the PDF, and it is unaffected.
+
+#### Not verified
+
+- The Linux column of MT-20 was not re-run after this change. The WeasyPrint
+  path's render code is unchanged; only the probe now returns `None` where it
+  used to raise. CI's Linux run covers it in tests, but no one has watched it
+  on a live server since.
+- The `strong` fixture's portable PDFs and the live technical PDF were
+  checked by the text-layer test only, not by eye.
+- The dashboard itself was not driven in a browser for this fix. The API it
+  calls was driven on a live server (MT-30).
+
 ### Added — download the PDF reports from the dashboard, and email them when a run completes
 
 A user request, outside the implementation plan.

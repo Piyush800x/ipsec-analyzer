@@ -1,0 +1,173 @@
+/* Print styling for the portable PDF renderer (xhtml2pdf).
+ *
+ * base.css is written for WeasyPrint, and xhtml2pdf implements a CSS 2.1
+ * subset: no flex, no margin boxes, no string-set, no counter(pages). So the
+ * portable renderer gets its own stylesheet, and the running header and
+ * footer are xhtml2pdf frames rather than @page margin boxes. The markup is
+ * the same template; only the styling and the page furniture differ.
+ *
+ * The font is Bitstream Vera, which reportlab ships inside its wheel. That
+ * makes the output identical on Windows and Linux with nothing installed on
+ * the system -- which is the point of this renderer. render.py registers the
+ * faces; the family name below has to match.
+ */
+
+@page {
+  size: a4 portrait;
+  margin: 20mm 18mm 18mm 18mm;
+
+  @frame header_frame {
+    -pdf-frame-content: pdf-header;
+    left: 18mm; right: 18mm; top: 9mm; height: 8mm;
+  }
+
+  @frame footer_frame {
+    -pdf-frame-content: pdf-footer;
+    left: 18mm; right: 18mm; bottom: 7mm; height: 8mm;
+  }
+}
+
+html, body {
+  font-family: Vera;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  color: #18181b;
+}
+
+#pdf-header, #pdf-footer {
+  font-size: 8pt;
+  color: #71717a;
+}
+
+#pdf-header { text-align: right; }
+
+h1 {
+  font-size: 20pt;
+  margin: 0 0 2mm;
+}
+
+h2 {
+  font-size: 12pt;
+  margin: 7mm 0 2mm;
+  padding-bottom: 1mm;
+  border-bottom: 0.4pt solid #d4d4d8;
+}
+
+h3 {
+  font-size: 10pt;
+  margin: 4mm 0 1mm;
+}
+
+p { margin: 0 0 2.5mm; }
+
+.subtitle {
+  color: #52525b;
+  font-size: 9pt;
+  margin-bottom: 5mm;
+}
+
+/* --- score block ---------------------------------------------------------
+ * No flex here, so the three figures stack. And no border on the band:
+ * xhtml2pdf paints a container's border around each child block separately,
+ * so a bordered band came out as six boxes. The same applies to .finding. */
+
+.score-band {
+  margin-bottom: 4mm;
+}
+
+.score-value {
+  font-size: 22pt;
+  font-weight: bold;
+  line-height: 1.1;
+}
+
+.score-label {
+  font-size: 8pt;
+  color: #71717a;
+  margin-bottom: 2mm;
+}
+
+.rating-critical { color: #b91c1c; }
+.rating-poor     { color: #c2410c; }
+.rating-fair     { color: #b45309; }
+.rating-good     { color: #4d7c0f; }
+.rating-strong   { color: #047857; }
+
+/* --- tables -------------------------------------------------------------- */
+
+table {
+  width: 100%;
+  margin: 2mm 0 4mm;
+  font-size: 8.5pt;
+}
+
+th {
+  text-align: left;
+  font-size: 7.5pt;
+  color: #71717a;
+  border-bottom: 0.5pt solid #a1a1aa;
+  padding: 1.2mm 2mm 1.2mm 0;
+}
+
+td {
+  padding: 1.4mm 2mm 1.4mm 0;
+  border-bottom: 0.3pt solid #e4e4e7;
+  vertical-align: top;
+}
+
+.num { text-align: right; }
+
+/* --- severity ------------------------------------------------------------ */
+
+.sev {
+  font-size: 7pt;
+  font-weight: bold;
+}
+
+.sev-critical      { background-color: #fee2e2; color: #991b1b; }
+.sev-high          { background-color: #ffedd5; color: #9a3412; }
+.sev-medium        { background-color: #fef3c7; color: #92400e; }
+.sev-low           { background-color: #e0f2fe; color: #075985; }
+.sev-informational { background-color: #f4f4f5; color: #3f3f46; }
+
+/* --- provenance ---------------------------------------------------------- */
+
+.prov { font-size: 7pt; }
+
+.prov-observed    { color: #075985; }
+.prov-inferred    { color: #6d28d9; }
+.prov-unavailable { color: #71717a; }
+
+/* An unavailable value renders as its reason, never as a blank or a dash --
+ * LLD section 11.3 and FR-4.9. */
+.unavailable-reason {
+  color: #52525b;
+  font-style: italic;
+  font-size: 8pt;
+}
+
+.finding {
+  margin-bottom: 5mm;
+}
+
+/* Vera rather than a monospace face: reportlab's built-in Courier covers
+ * WinAnsi only, and a measured value outside it would print as a blank. A
+ * correct proportional glyph beats a missing monospaced one. */
+.evidence {
+  font-size: 7.5pt;
+  color: #52525b;
+  background-color: #fafafa;
+  padding: 1.5mm 2mm;
+  border-left: 1pt solid #d4d4d8;
+  margin: 1.5mm 0;
+}
+
+.callout {
+  border-left: 2pt solid #a1a1aa;
+  padding: 2mm 0 2mm 3mm;
+  margin: 3mm 0;
+  background-color: #fafafa;
+}
+
+.muted { color: #71717a; }
+.small { font-size: 8pt; }

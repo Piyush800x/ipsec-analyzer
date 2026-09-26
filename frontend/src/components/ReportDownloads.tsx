@@ -3,11 +3,11 @@
 /**
  * Download buttons for the two PDF reports (FR-6.6, FR-6.7).
  *
- * `fetch` and a blob rather than a plain `<a href download>`, because the
- * endpoint can fail in a way worth explaining: a deployment without
- * WeasyPrint's native libraries answers 503 with the fix in its Problem
- * Details `detail`. An anchor would save that JSON as a file named `.pdf`, or
- * navigate to it; this shows the sentence instead.
+ * `fetch` and a blob rather than a plain `<a href download>`, because when
+ * the endpoint fails its Problem Details `detail` is worth showing. An anchor
+ * would save that JSON as a file named `.pdf`, or navigate to it; this shows
+ * the sentence instead. (A missing PDF engine is no longer one of those
+ * failures: the backend falls back to a pure-Python renderer.)
  */
 
 import { useState } from "react";

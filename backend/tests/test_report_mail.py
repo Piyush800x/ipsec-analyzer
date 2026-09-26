@@ -25,13 +25,7 @@ from analyzer.report.mail import (
     build_message,
     send_message,
 )
-from analyzer.report.render import (
-    PDF_BACKEND_HINT,
-    PdfBackendUnavailableError,
-    pdf_backend_available,
-    report_filename,
-    top_risks,
-)
+from analyzer.report.render import PdfRenderError, report_filename, top_risks
 from tests._smtp import SmtpSink, free_port, throwaway_credential
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -39,11 +33,6 @@ ASSESSMENT_ID = UUID("01920000-0000-7000-8000-00000000abcd")
 SENDER = "IPsec Analyzer <reports@analyzer.test>"
 RECIPIENT = "analyst@example.com"
 FAKE_PDFS = {"executive": b"%PDF-1.7 executive body", "technical": b"%PDF-1.7 technical body"}
-
-needs_pdf_backend = pytest.mark.skipif(
-    not pdf_backend_available(),
-    reason="WeasyPrint's native libraries are not installed; see render.PDF_BACKEND_HINT",
-)
 
 
 def _weak() -> Assessment:
@@ -203,8 +192,9 @@ def test_an_unreachable_server_is_a_report_email_error() -> None:
 # --- the mailer: render, then send ---------------------------------------------
 
 
-@needs_pdf_backend
 def test_the_mailer_sends_both_rendered_pdfs(smtp_sink: SmtpSink) -> None:
+    """Runs everywhere now, including Windows without GTK, where it renders
+    through the portable engine -- the case this feature failed on."""
     ReportMailer(_config(smtp_sink.port), rule_count=14).deliver(_weak(), ASSESSMENT_ID, RECIPIENT)
 
     [received] = smtp_sink.received
@@ -215,18 +205,19 @@ def test_the_mailer_sends_both_rendered_pdfs(smtp_sink: SmtpSink) -> None:
         assert pdf.rstrip().endswith(b"%%EOF")
 
 
-def test_without_a_pdf_backend_nothing_is_sent(
+def test_when_rendering_fails_nothing_is_sent(
     smtp_sink: SmtpSink, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An email promising two reports and carrying none is worse than no email."""
 
-    def _no_backend(*args: object, **kwargs: object) -> bytes:
-        raise PdfBackendUnavailableError(PDF_BACKEND_HINT)
+    def _fails(*args: object, **kwargs: object) -> bytes:
+        msg = "xhtml2pdf reported 1 error(s) rendering the report"
+        raise PdfRenderError(msg)
 
-    monkeypatch.setattr("analyzer.report.mail.render_pdf", _no_backend)
+    monkeypatch.setattr("analyzer.report.mail.render_pdf", _fails)
     mailer = ReportMailer(_config(smtp_sink.port), rule_count=14)
 
-    with pytest.raises(ReportEmailError, match="PDF rendering"):
+    with pytest.raises(ReportEmailError, match="rendered as PDFs"):
         mailer.deliver(_weak(), ASSESSMENT_ID, RECIPIENT)
     assert smtp_sink.received == []
 

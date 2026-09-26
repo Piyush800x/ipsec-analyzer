@@ -32,7 +32,6 @@ from analyzer.api.schemas import AnalyzeAccepted, AnalyzeRequest, CapturePage, C
 from analyzer.core.enums import CaptureSource, RunStatus
 from analyzer.core.ids import new_id
 from analyzer.db import models
-from analyzer.report.render import PDF_BACKEND_HINT, pdf_backend_available
 
 router = APIRouter(prefix="/captures", tags=["captures"])
 
@@ -171,8 +170,11 @@ def _check_can_email(runner: JobRunner) -> None:
 
     Checked up front rather than discovered when the run finishes: an analyst
     who asked for the reports by email and got a silent nothing a minute later
-    has been told something false. Both refusals are 503s because the request
-    is fine and an operator's install is what is missing.
+    has been told something false. A 503 because the request is fine and an
+    operator's configuration is what is missing.
+
+    There is no PDF check here any more. ``render_pdf`` falls back to a
+    pure-Python engine, so every deployment can produce the attachments.
     """
     if not runner.can_email:
         raise DependencyUnavailableError(
@@ -181,8 +183,6 @@ def _check_can_email(runner: JobRunner) -> None:
             "not need it: start it again without an email address.",
             capability="email",
         )
-    if not pdf_backend_available():
-        raise DependencyUnavailableError(PDF_BACKEND_HINT, capability="pdf")
 
 
 @router.post(

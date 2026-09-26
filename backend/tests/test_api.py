@@ -26,21 +26,11 @@ from analyzer.core.config import Settings
 from analyzer.core.enums import SmtpSecurity
 from analyzer.db.models import Base
 from analyzer.db.session import create_db_engine
-from analyzer.report.render import (
-    PDF_BACKEND_HINT,
-    PdfBackendUnavailableError,
-    pdf_backend_available,
-)
 from tests._pcap import DLT_EN10MB, esp_payload, eth_frame, ipv4_packet, udp_packet, write_pcap
 from tests._smtp import SmtpSink
 from tests.conftest import postgres_url
 
 BASELINE = Path(__file__).resolve().parents[1] / "src/analyzer/assess/policies/baseline.yaml"
-
-needs_pdf_backend = pytest.mark.skipif(
-    not pdf_backend_available(),
-    reason="WeasyPrint's native libraries are not installed; see render.PDF_BACKEND_HINT",
-)
 
 
 def _database_url(backend: str, tmp_path: Path) -> str:
@@ -437,7 +427,6 @@ async def test_endpoints_are_versioned(client: AsyncClient, path: str) -> None:
 # --- step 10.4: report endpoints -------------------------------------------
 
 
-@needs_pdf_backend
 @pytest.mark.parametrize("report_format", ["executive", "technical"])
 async def test_report_downloads_as_pdf(
     client: AsyncClient, tmp_path: Path, report_format: str
@@ -472,14 +461,18 @@ async def test_report_rejects_an_unknown_format(client: AsyncClient, tmp_path: P
     assert response.status_code == 422
 
 
-# --- cross-platform: the PDF backend is optional, the API is not -----------
+# --- cross-platform: PDFs render with or without WeasyPrint -----------------
 
 
-async def test_report_renders_html_without_the_pdf_backend(
-    client: AsyncClient, tmp_path: Path
-) -> None:
-    """``?inline=1`` is pure Jinja2 and must work on a machine with no GTK,
-    which is the default state of a Windows box."""
+def _without_weasyprint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make this machine look like stock Windows: no GTK, so no WeasyPrint.
+    On a machine that really has no GTK this changes nothing, which is fine;
+    on Linux CI it is what makes the fallback path run at all."""
+    monkeypatch.setattr("analyzer.report.render._weasyprint", lambda: None)
+
+
+async def test_report_renders_html(client: AsyncClient, tmp_path: Path) -> None:
+    """``?inline=1`` is pure Jinja2, the fastest way to look at a template."""
     run = await _analyse(client, tmp_path)
     response = await client.get(
         f"{API_PREFIX}/assessments/{run['assessmentId']}/report",
@@ -491,29 +484,22 @@ async def test_report_renders_html_without_the_pdf_backend(
     assert "<html" in response.text.lower()
 
 
-async def test_missing_pdf_backend_is_a_503_that_names_the_remedy(
-    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("report_format", ["executive", "technical"])
+async def test_report_downloads_as_pdf_without_weasyprint(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report_format: str
 ) -> None:
-    """A missing native library is not the analyst's fault and not a bug in
-    the request, so it must not surface as an opaque 500. The 503 has to carry
-    the fix, because the person reading it is the person who can apply it."""
+    """This was a 503 naming the GTK3 runtime. A download button that works
+    only after an operator installs a desktop toolkit does not work."""
+    _without_weasyprint(monkeypatch)
     run = await _analyse(client, tmp_path)
+    response = await client.get(
+        f"{API_PREFIX}/assessments/{run['assessmentId']}/report",
+        params={"format": report_format},
+    )
 
-    def _no_backend(*args: object, **kwargs: object) -> bytes:
-        raise PdfBackendUnavailableError(PDF_BACKEND_HINT)
-
-    monkeypatch.setattr("analyzer.api.routes.reports.render_pdf", _no_backend)
-
-    response = await client.get(f"{API_PREFIX}/assessments/{run['assessmentId']}/report")
-
-    assert response.status_code == 503
-    assert response.headers["content-type"].startswith(PROBLEM_CONTENT_TYPE)
-    body = response.json()
-    assert body["title"] == "Service unavailable"
-    assert body["capability"] == "pdf"
-    # The two things the reader needs: the way out now, and the way to fix it.
-    assert "?inline=1" in body["detail"]
-    assert "GTK3" in body["detail"]
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF-")
 
 
 # --- emailed reports ---------------------------------------------------------
@@ -573,7 +559,6 @@ async def test_an_empty_json_body_starts_an_ordinary_run(
     assert "email" not in events[-1].data
 
 
-@needs_pdf_backend
 async def test_a_completed_run_emails_both_reports(
     mailing_client: AsyncClient, smtp_sink: SmtpSink, tmp_path: Path
 ) -> None:
@@ -600,7 +585,27 @@ async def test_a_completed_run_emails_both_reports(
     assert f"http://dashboard.test/assessments/{assessment_id}" in body.get_content()
 
 
-@needs_pdf_backend
+async def test_an_address_is_accepted_and_emailed_without_weasyprint(
+    mailing_client: AsyncClient,
+    smtp_sink: SmtpSink,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reported bug. On Windows without GTK, giving an address on the
+    capture page was refused with a 503 about the GTK3 runtime, before the run
+    even started. The portable engine renders the attachments instead."""
+    _without_weasyprint(monkeypatch)
+    run_id = await _start(mailing_client, tmp_path, json={"notifyEmail": MAIL_RECIPIENT})
+    events = await _events(mailing_client, run_id)
+
+    assert events[-1].event == "complete"
+    assert events[-1].data["email"] == {"status": "sent"}
+    [received] = smtp_sink.received
+    attachments = [a.get_content() for a in received.message.iter_attachments()]
+    assert len(attachments) == 2
+    assert all(pdf.startswith(b"%PDF-") for pdf in attachments)
+
+
 async def test_a_failed_email_does_not_fail_the_run(
     mailing_client: AsyncClient, smtp_sink: SmtpSink, tmp_path: Path
 ) -> None:
