@@ -33,7 +33,7 @@ from analyzer.core.config import Settings
 from analyzer.core.enums import Severity, SmtpSecurity
 from analyzer.core.schema import Assessment
 from analyzer.report.render import (
-    PdfRenderError,
+    PdfBackendUnavailableError,
     ReportFormat,
     render_pdf,
     report_filename,
@@ -237,8 +237,8 @@ class ReportMailer:
                 fmt: render_pdf(assessment, fmt, rule_count=self._rule_count)
                 for fmt in REPORT_FORMATS
             }
-        except PdfRenderError as exc:
-            msg = "The reports could not be rendered as PDFs, so there was nothing to attach."
+        except PdfBackendUnavailableError as exc:
+            msg = "PDF rendering is not available on this server, so there was nothing to attach."
             raise ReportEmailError(msg) from exc
 
         message = build_message(

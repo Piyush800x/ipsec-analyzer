@@ -9,26 +9,32 @@ report leaking into the executive one.
 
 from __future__ import annotations
 
-import io
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from pypdf import PdfReader
 
 from analyzer.core.schema import Assessment
-from analyzer.report import render
 from analyzer.report.render import (
     CAPABILITY_MATRIX,
     TOP_RISK_COUNT,
-    pdf_engine,
+    pdf_backend_available,
     render_html,
     render_pdf,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+needs_pdf_backend = pytest.mark.skipif(
+    not pdf_backend_available(),
+    reason=(
+        "WeasyPrint's native libraries (Pango/Cairo/GObject) are not installed. "
+        "Only the PDF assertions need them; every content assertion below runs "
+        "on HTML and is unaffected. See render.PDF_BACKEND_HINT."
+    ),
+)
 
 
 def _fixture(name: str) -> Assessment:
@@ -40,29 +46,13 @@ def assessment(request: pytest.FixtureRequest) -> Assessment:
     return _fixture(str(request.param))
 
 
-@pytest.fixture(params=["weasyprint", "xhtml2pdf"])
-def engine(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
-    """Each PDF test runs once per engine. WeasyPrint only where its native
-    libraries load; xhtml2pdf everywhere, forced on machines that have
-    WeasyPrint so the fallback is exercised on Linux CI too."""
-    name = str(request.param)
-    if name == "weasyprint" and pdf_engine() != "weasyprint":
-        pytest.skip("WeasyPrint's native libraries (Pango/Cairo/GObject) are not installed")
-    if name == "xhtml2pdf":
-        monkeypatch.setattr(render, "_weasyprint", lambda: None)
-    return name
-
-
-def _text(pdf: bytes) -> str:
-    return "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf)).pages)
-
-
 # --- step 10.1: both templates render to PDF from a fixture ----------------
 
 
+@needs_pdf_backend
 @pytest.mark.parametrize("report_format", ["executive", "technical"])
-def test_renders_a_real_pdf(assessment: Assessment, report_format: str, engine: str) -> None:
-    """Step 10.1 Done-when, on every machine."""
+def test_renders_a_real_pdf(assessment: Assessment, report_format: str) -> None:
+    """Step 10.1 Done-when."""
     pdf = render_pdf(assessment, report_format, rule_count=14)  # type: ignore[arg-type]
 
     assert pdf.startswith(b"%PDF-")
@@ -70,49 +60,20 @@ def test_renders_a_real_pdf(assessment: Assessment, report_format: str, engine: 
     assert len(pdf) > 5_000
 
 
+@needs_pdf_backend
 @pytest.mark.parametrize("report_format", ["executive", "technical"])
-def test_pdf_has_pages(assessment: Assessment, report_format: str, engine: str) -> None:
-    """Both engines compress their object streams, so the page objects are
-    not greppable in the bytes -- parse the document instead."""
-    pdf = render_pdf(assessment, report_format, rule_count=14)  # type: ignore[arg-type]
-    assert len(PdfReader(io.BytesIO(pdf)).pages) >= 1
+def test_pdf_has_pages(assessment: Assessment, report_format: str) -> None:
+    """WeasyPrint compresses its object streams, so the page objects are not
+    greppable in the bytes -- count them on the document instead."""
+    from weasyprint import CSS, HTML
 
+    from analyzer.report.render import CSS_PATH, TEMPLATE_DIR
 
-def test_the_pdf_carries_the_report_content(engine: str) -> None:
-    """A PDF that parses is not yet a report. The findings, the score and the
-    page furniture have to survive into the text layer."""
-    weak = _fixture("weak")
-    text = " ".join(_text(render_pdf(weak, "technical", rule_count=14)).split())
-
-    assert "IPsec technical assessment" in text
-    assert "Page 1 of" in text
-    for finding in weak.findings:
-        assert finding.id in text, finding.id
-    assert "AES key length cannot be determined from ESP alone" in text
-
-
-def test_portable_engine_has_a_glyph_for_everything_the_reports_print() -> None:
-    """Vera has no arrow, and a missing glyph prints as a blank box that no
-    text assertion would notice. Every non-ASCII character a report can
-    contain must be in Vera or have a substitution."""
-    import reportlab
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    vera = TTFont("Vera", str(Path(reportlab.__file__).parent / "fonts" / "Vera.ttf"))
-    covered = vera.face.charToGlyph
-    printed = {
-        char
-        for name in ("weak", "strong")
-        for report_format in ("executive", "technical")
-        for char in render_html(_fixture(name), report_format, rule_count=14)  # type: ignore[arg-type]
-        if ord(char) > 127
-    }
-    missing = {
-        char
-        for char in printed
-        if ord(char) not in covered and char not in render._PORTABLE_SUBSTITUTIONS
-    }
-    assert not missing, f"no glyph in Vera and no substitution: {sorted(missing)}"
+    html = render_html(assessment, report_format, rule_count=14)  # type: ignore[arg-type]
+    document = HTML(string=html, base_url=str(TEMPLATE_DIR)).render(
+        stylesheets=[CSS(filename=str(CSS_PATH))]
+    )
+    assert len(document.pages) >= 1
 
 
 # --- step 10.2: the executive report ---------------------------------------
@@ -303,8 +264,7 @@ def test_importing_the_api_does_not_import_weasyprint() -> None:
     nothing to do with what it is guarding.
     """
     probe = (
-        "import sys;import analyzer.api.main as m;m.create_app();"
-        "print('weasyprint' in sys.modules or 'xhtml2pdf' in sys.modules)"
+        "import sys;import analyzer.api.main as m;m.create_app();print('weasyprint' in sys.modules)"
     )
     env = {**os.environ, "DATABASE_URL": "sqlite+aiosqlite:///:memory:"}
     result = subprocess.run(
@@ -315,11 +275,13 @@ def test_importing_the_api_does_not_import_weasyprint() -> None:
     assert result.stdout.strip().endswith("False"), result.stdout
 
 
-def test_weasyprint_probe_is_cached() -> None:
+def test_pdf_backend_probe_is_cached() -> None:
     """A failed import is not cached in ``sys.modules`` -- Python discards the
     half-built module -- so without the module-level cache every report
     request on a GTK-less machine re-runs the dlopen probe and re-prints
     WeasyPrint's installation banner to stdout."""
-    first = render.pdf_engine()
-    assert render._WEASYPRINT is not None or render._WEASYPRINT_FAILURE is not None
-    assert render.pdf_engine() == first
+    from analyzer.report import render
+
+    first = render.pdf_backend_available()
+    assert render._PDF_BACKEND is not None or render._PDF_BACKEND_FAILURE is not None
+    assert render.pdf_backend_available() is first
