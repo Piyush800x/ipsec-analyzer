@@ -9,6 +9,7 @@ breaks.
 
 from __future__ import annotations
 
+import secrets
 import socket
 from dataclasses import dataclass
 from email import message_from_bytes, policy
@@ -18,6 +19,16 @@ from typing import Any, cast
 
 from aiosmtpd.controller import Controller
 from aiosmtpd.smtp import SMTP, AuthResult, Envelope, LoginPassword, Session
+
+
+def throwaway_credential() -> str:
+    """A fresh random value for a test login, different on every call.
+
+    Generated rather than written down. A literal username and password in the
+    tree is exactly what secret scanners flag, and rightly: a scanner cannot
+    tell a test sink's login from a real one.
+    """
+    return secrets.token_urlsafe(16)
 
 
 def free_port() -> int:

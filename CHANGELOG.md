@@ -75,12 +75,29 @@ controlled input's state stayed empty. `AnalyzeButton` now reads the address
 from the form at submit time. Re-run with the address typed before hydration
 (`hydrated before typing: False`): delivered.
 
-Tests: `test_report_mail.py` (18) sends through a real aiosmtpd server on
+Tests: `test_report_mail.py` (19) sends through a real aiosmtpd server on
 loopback (`tests/_smtp.py`), covering attachments, headers, AUTH, a refused
 recipient, a dead server and a missing PDF backend. `test_api.py` adds six
 tests on both backends: the 503, the 422, `{}` behaving like no body, a
 delivered run, a failed delivery that still completes, and SMTP configured but
 no address given. `test_config.py` adds three.
+
+Test logins are generated per run (`tests/_smtp.py::throwaway_credential()`)
+and never written down. The first push had literal username/password pairs in
+`test_report_mail.py`, which GitGuardian flagged as a username/password and
+an authentication tuple. They were fake, but a scanner cannot know that, and
+the flags would have blocked the pull request.
+
+**Found and fixed while removing them.**
+- **The email API tests read the developer's `.env`.** With real Gmail
+  settings in it, `mailing_client` kept its loopback host but inherited
+  `SMTP_USERNAME`/`SMTP_PASSWORD`, so it sent a real App Password to the test
+  sink (still on loopback) and failed. `_settings()` in `test_api.py` now
+  passes `_env_file=None` and sets every SMTP field explicitly.
+- **A server without AUTH was reported as lacking STARTTLS.** `starttls()` and
+  `login()` both raise `SMTPNotSupportedError`, and one shared `except` gave
+  both the STARTTLS message. Each call site now catches its own, and a
+  regression test pins the login case.
 
 Verified end to end on 2026-09-26 against the running stack (uvicorn + the
 production `next start` build + a local SMTP sink), driving headless Chrome

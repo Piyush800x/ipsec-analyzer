@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from analyzer.core.config import ConfigurationError, Settings, get_settings
+from tests._smtp import throwaway_credential
 
 ENV_VARS = (
     "DATABASE_URL",
@@ -246,9 +247,10 @@ def test_smtp_settings_load_from_the_environment(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("SMTP_SECURITY", "ssl")
     monkeypatch.setenv("SMTP_FROM", "IPsec Analyzer <reports@example.com>")
     monkeypatch.setenv("SMTP_USERNAME", "reports@example.com")
-    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+    secret = throwaway_credential()
+    monkeypatch.setenv("SMTP_PASSWORD", secret)
 
     settings = get_settings()
     assert settings.smtp_security == "ssl"
     assert settings.smtp_password is not None
-    assert settings.smtp_password.get_secret_value() == "app-password"
+    assert settings.smtp_password.get_secret_value() == secret

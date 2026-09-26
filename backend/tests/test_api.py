@@ -81,9 +81,15 @@ def _settings(backend: str, tmp_path: Path, **overrides: object) -> Settings:
         "model_dir": tmp_path / "models",
         "max_upload_bytes": 64 * 1024 * 1024,
         "max_concurrent_analyses": 2,
-        # Explicit, so an SMTP_HOST in a developer's .env cannot switch
-        # emailing on underneath a test that asserts it is off.
+        # Explicit, and no .env read at all: a developer's real SMTP settings
+        # must never reach a test. They did once -- the email tests sent a
+        # real Gmail username and App Password to the loopback test sink,
+        # which then failed for a reason that had nothing to do with the code.
+        "_env_file": None,
         "smtp_host": None,
+        "smtp_username": None,
+        "smtp_password": None,
+        "dashboard_url": None,
         **overrides,
     }
     return Settings(**fields)  # type: ignore[arg-type] # keys are Settings fields
