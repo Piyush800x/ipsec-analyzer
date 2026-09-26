@@ -22,7 +22,7 @@ To run both locally::
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,6 +32,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from analyzer.db.session import create_db_engine
+from tests._smtp import SmtpSink
 
 if TYPE_CHECKING:
     from _pytest.fixtures import SubRequest
@@ -95,6 +96,13 @@ async def engine(backend: str, tmp_path: Path) -> AsyncIterator[AsyncEngine]:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest.fixture
+def smtp_sink() -> Iterator[SmtpSink]:
+    """A live SMTP server on loopback that keeps what it is sent. tests/_smtp.py."""
+    with SmtpSink() as sink:
+        yield sink
 
 
 # --- testbed (Phase 2) -------------------------------------------------------

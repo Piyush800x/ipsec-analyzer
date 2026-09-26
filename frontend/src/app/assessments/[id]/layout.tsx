@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ReportDownloads } from "@/components/ReportDownloads";
 import { ScoreDial } from "@/components/ui";
-import { getAssessment } from "@/lib/api";
+import { getAssessment, USE_FIXTURES } from "@/lib/api";
 
 const TABS = [
   { slug: "", label: "Overview" },
@@ -72,6 +73,17 @@ export default async function AssessmentLayout({
             <dd className="font-mono">{assessment.engine_version}</dd>
           </div>
         </dl>
+
+        {/* Fixture mode has no backend to render a PDF, so offer nothing
+            rather than two buttons that can only fail. */}
+        {!USE_FIXTURES && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+            <p className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Download report
+            </p>
+            <ReportDownloads assessmentId={id} />
+          </div>
+        )}
       </header>
 
       <nav className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">

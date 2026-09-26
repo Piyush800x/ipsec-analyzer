@@ -22,6 +22,9 @@ export type FindingCategory =
   | "replay_integrity"
   | "metadata_exposure";
 
+/** `core/enums.py` `EmailDelivery`. Rides on the run's SSE `complete` event. */
+export type EmailDelivery = "sent" | "failed";
+
 export type TrafficClass =
   | "icmp"
   | "web"

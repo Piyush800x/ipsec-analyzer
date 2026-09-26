@@ -76,6 +76,8 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-25 | A tunnel still rekeys, and does it on time | 9.3 | 2026-09-07 | Pass |
 | MT-26 | The backend image actually carries the trained models | 11.4 | 2026-09-07 | Pass |
 | MT-27 | Upload → click capture → analyse → assessment, in a browser | 7.5, 7.6 | 2026-09-08 | Pass (curl-verified; browser walkthrough still owed) |
+| MT-28 | Download both PDFs, and email them on completion, in a browser | reports (user request) | 2026-09-26 | Pass (headless Chrome over CDP, local SMTP sink) |
+| MT-29 | Emailed reports reach a real mailbox over TLS | reports (user request) | — | **Not run** |
 
 ---
 
@@ -1252,3 +1254,73 @@ final link to land on a populated assessment overview.
 > actual browser walkthrough — watching the progress bar move rather than
 > trusting the API sequence it is built from — has not been done and still
 > needs a person**, same gap MT-19 already named for the dashboard generally.
+
+## MT-28 — Download both PDFs, and email them on completion, in a browser
+
+**Proves** the dashboard's download buttons and the email-on-completion path
+work together through the real UI. The automated suite sends through a loopback
+SMTP server and never touches a browser, and the browser is where this broke:
+an address typed before React hydrated was silently dropped, and only driving
+the page found it.
+
+```bash
+# a sink that saves every message it receives (aiosmtpd is in the dev group)
+cd backend && uv run python -m aiosmtpd -n -l 127.0.0.1:1025 -c aiosmtpd.handlers.Mailbox /tmp/mt28-mail
+
+cd backend && SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_SECURITY=none \
+  SMTP_FROM="IPsec Analyzer <reports@analyzer.local>" DASHBOARD_URL=http://localhost:3000 \
+  uv run uvicorn analyzer.api.main:create_app --factory --port 8000
+cd frontend && npm run build && API_BASE_URL=http://localhost:8000 npx next start -p 3000
+```
+
+In a browser: upload `dataset/demo/demo-tunnel-a/capture.pcap` on `/` and open
+it. Type an address into **Email the PDF reports when it finishes**, click
+**Analyse this capture**, and wait. Click **↓ Executive PDF**, then **View the
+assessment**, then **↓ Technical PDF** in its header. Then stop the sink and
+analyse again with an address.
+
+**Expect** the stage list to gain *Emailing reports*, then a green *Both PDF
+reports were emailed to …*. One message lands in `/tmp/mt28-mail/new/`, subject
+`IPsec assessment: <rating> (<score>/100)`, with two `application/pdf`
+attachments named `ipsec-{executive,technical}-<assessment id>.pdf`. They
+should be byte-identical to the two downloads (`cmp`). With the sink stopped,
+the run still completes, an amber box says *…could not be emailed: Could not
+connect to the mail server*, and both downloads still work.
+
+**Watch for** a run that finishes with the four ordinary stages only and no
+green or amber box. That means the address never reached the backend: the
+hydration bug, back.
+
+> Last verified 2026-09-26 · uncommitted, on `main` after `e7d1659` · Pass ·
+> Driven through headless Chrome over the DevTools protocol rather than by
+> hand, with a custom sink that wrote `.eml` files. Delivered with the address
+> typed *before* hydration; the emailed PDFs were byte-identical to the
+> downloads (16,381 and 36,172 bytes); the failure path behaved as above.
+> A human looking at the pages is still worth doing once. The screenshots
+> matched, but a script does not notice what looks wrong.
+
+## MT-29 — Emailed reports reach a real mailbox over TLS
+
+**Proves** the `starttls` and `ssl` paths, which no automated test exercises:
+the loopback sink has no certificate, so every automated send is cleartext.
+
+```bash
+# in .env, e.g. Gmail with an App Password:
+SMTP_HOST=smtp.gmail.com
+SMTP_SECURITY=starttls
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=<16-character app password>
+SMTP_FROM=IPsec Analyzer <you@gmail.com>
+```
+
+Start the stack as in MT-28 without the `SMTP_*` overrides, analyse a capture
+with your own address, then repeat with `SMTP_SECURITY=ssl` (port 465).
+
+**Expect** the message in your inbox, not spam, with both PDFs opening in a
+viewer, and the green confirmation in the dashboard for both security modes.
+
+**Watch for** *The mail server rejected this server's SMTP credentials*. With
+Gmail that means the account password was used instead of an App Password.
+
+> Last verified — · **Not run**. Needs a real mailbox and credentials.
+

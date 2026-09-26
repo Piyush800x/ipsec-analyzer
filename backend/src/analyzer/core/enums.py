@@ -312,3 +312,28 @@ class RunStage(StrEnum):
     TRACK_B = "track_b"
     ASSESS = "assess"
     REPORT = "report"
+
+
+class EmailDelivery(StrEnum):
+    """Outcome of emailing the reports when a run completes.
+
+    Carried as ``email.status`` on the run's SSE ``complete`` event, and only
+    when the analyst asked for the reports to be emailed. A failed delivery
+    does not fail the run: the assessment was persisted before sending began.
+    """
+
+    SENT = "sent"
+    FAILED = "failed"
+
+
+class SmtpSecurity(StrEnum):
+    """How the connection to ``SMTP_HOST`` is secured. ``SMTP_SECURITY``."""
+
+    STARTTLS = "starttls"
+    """Connect in cleartext, then upgrade before authenticating. Port 587."""
+
+    SSL = "ssl"
+    """TLS from the first byte ("implicit TLS", RFC 8314). Port 465."""
+
+    NONE = "none"
+    """No TLS at all. Only for a relay on the same host, or a test sink."""

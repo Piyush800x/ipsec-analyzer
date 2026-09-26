@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.alias_generators import to_camel
 
 from analyzer.core.enums import CaptureSource, FindingCategory, RunStage, RunStatus, Severity
@@ -113,6 +113,22 @@ class HealthResponse(ApiModel):
     status: Literal["ok", "degraded"]
     database: Literal["up", "down"]
     version: str
+
+
+class AnalyzeRequest(ApiModel):
+    """Optional body of ``POST /captures/{id}/analyze``.
+
+    The body itself is optional too: a POST with none starts an analysis
+    exactly as it always has, so no existing client changes.
+    """
+
+    notify_email: EmailStr | None = Field(
+        default=None,
+        description=(
+            "Email both PDF reports to this address when the run completes. "
+            "Refused with a 503 when this server has no SMTP configured."
+        ),
+    )
 
 
 class AnalyzeAccepted(ApiModel):

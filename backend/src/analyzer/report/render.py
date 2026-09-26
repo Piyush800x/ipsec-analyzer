@@ -13,13 +13,15 @@ the provenance of every parameter, and the limitations (step 10.3).
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any, Final, Literal
+from uuid import UUID
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from analyzer.core.enums import CATEGORY_CAPS, Provenance, Severity
-from analyzer.core.schema import Assessment, Attribute, SecurityAssociation
+from analyzer.core.schema import Assessment, Attribute, Finding, SecurityAssociation
 
 TEMPLATE_DIR: Final = Path(__file__).parent / "templates"
 CSS_PATH: Final = TEMPLATE_DIR / "base.css"
@@ -170,10 +172,16 @@ def _quality_caveats(assessment: Assessment) -> list[str]:
     return caveats
 
 
-def _context(assessment: Assessment, rule_count: int) -> dict[str, Any]:
+def top_risks(assessment: Assessment) -> list[Finding]:
+    """The findings the executive report leads with: most severe first, then
+    heaviest penalty, then rule key so ties render in a stable order."""
     findings = sorted(
         assessment.findings, key=lambda f: (_SEVERITY_ORDER[f.severity], -f.penalty, f.id)
     )
+    return findings[:TOP_RISK_COUNT]
+
+
+def _context(assessment: Assessment, rule_count: int) -> dict[str, Any]:
     unavailable = sum(
         1
         for sa in assessment.security_associations
@@ -184,7 +192,7 @@ def _context(assessment: Assessment, rule_count: int) -> dict[str, Any]:
         "a": assessment,
         "q": assessment.capture_quality,
         "generated_at": assessment.generated_at.strftime("%Y-%m-%d %H:%M UTC"),
-        "top_risks": findings[:TOP_RISK_COUNT],
+        "top_risks": top_risks(assessment),
         "rule_count": rule_count,
         "unavailable_count": unavailable,
         "quality_caveats": _quality_caveats(assessment),
@@ -195,10 +203,24 @@ def _context(assessment: Assessment, rule_count: int) -> dict[str, Any]:
     }
 
 
+def report_filename(report_format: ReportFormat, assessment_id: UUID) -> str:
+    """The PDF's file name. Shared by the download endpoint and the emailed
+    attachment, so the file an analyst receives is the file they would have
+    downloaded, under the same name."""
+    return f"ipsec-{report_format}-{assessment_id}.pdf"
+
+
 def render_html(assessment: Assessment, report_format: ReportFormat, *, rule_count: int = 0) -> str:
     template = _environment().get_template(f"{report_format}.html.j2")
     return template.render(**_context(assessment, rule_count))
 
+
+_RENDER_LOCK: Final = threading.Lock()
+"""One PDF render at a time, process-wide. Downloads render on the event-loop
+thread and emailed reports on a worker thread, so two can overlap, and
+WeasyPrint makes no thread-safety promise for the Pango/Cairo state beneath it.
+A render takes well under a second; serialising them costs nothing a user
+would notice, and a crash in native code would take the whole API down."""
 
 _PDF_BACKEND: tuple[Any, Any] | None = None
 _PDF_BACKEND_FAILURE: Exception | None = None
@@ -255,8 +277,9 @@ def render_pdf(
     """
     css, html_cls = _weasyprint()
     html = render_html(assessment, report_format, rule_count=rule_count)
-    document = html_cls(string=html, base_url=str(TEMPLATE_DIR)).render(
-        stylesheets=[css(filename=str(CSS_PATH))]
-    )
-    pdf: bytes = document.write_pdf()
+    with _RENDER_LOCK:
+        document = html_cls(string=html, base_url=str(TEMPLATE_DIR)).render(
+            stylesheets=[css(filename=str(CSS_PATH))]
+        )
+        pdf: bytes = document.write_pdf()
     return pdf

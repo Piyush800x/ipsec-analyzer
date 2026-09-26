@@ -25,6 +25,7 @@ from analyzer.assess.engine import AssessmentEngine
 from analyzer.assess.policy import load_policy
 from analyzer.core.config import Settings, get_settings
 from analyzer.db.session import check_connection, create_db_engine, create_session_factory
+from analyzer.report.mail import ReportMailer, SmtpConfig
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,16 @@ def create_app(
     engine = db_engine or create_db_engine(resolved.database_url)
     session_factory = create_session_factory(engine)
     assessment_engine = AssessmentEngine(load_policy(resolved.policy_path))
+    smtp = SmtpConfig.from_settings(resolved)
+    report_mailer = (
+        ReportMailer(
+            smtp,
+            rule_count=len(assessment_engine.policy.rules),
+            dashboard_url=resolved.dashboard_url,
+        )
+        if smtp is not None
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -76,6 +87,7 @@ def create_app(
             engine_version=__version__,
             model_dir=resolved.model_dir,
             use_process_pool=use_process_pool,
+            mailer=report_mailer,
         )
         reachable = await check_connection(engine)
         if not reachable:
