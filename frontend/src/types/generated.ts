@@ -228,6 +228,20 @@ export interface components {
             runId: string;
             status: components["schemas"]["RunStatus"];
         };
+        /**
+         * AnalyzeRequest
+         * @description Optional body of ``POST /captures/{id}/analyze``.
+         *
+         *     The body itself is optional too: a POST with none starts an analysis
+         *     exactly as it always has, so no existing client changes.
+         */
+        AnalyzeRequest: {
+            /**
+             * Notifyemail
+             * @description Email both PDF reports to this address when the run completes. Refused with a 503 when this server has no SMTP configured.
+             */
+            notifyEmail?: string | null;
+        };
         /** AssessmentSummary */
         AssessmentSummary: {
             /**
@@ -742,7 +756,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {

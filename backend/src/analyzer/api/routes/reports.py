@@ -17,7 +17,12 @@ from analyzer.api.deps import SessionDep
 from analyzer.api.errors import DependencyUnavailableError, NotFoundError
 from analyzer.core.schema import Assessment as AssessmentDocument
 from analyzer.db import models
-from analyzer.report.render import PdfBackendUnavailableError, render_html, render_pdf
+from analyzer.report.render import (
+    PdfBackendUnavailableError,
+    render_html,
+    render_pdf,
+    report_filename,
+)
 
 router = APIRouter(prefix="/assessments", tags=["reports"])
 
@@ -57,7 +62,7 @@ async def get_report(
         # the analyst actually wants is one query parameter away, so say so.
         raise DependencyUnavailableError(str(exc), capability="pdf") from exc
 
-    filename = f"ipsec-{report_format}-{assessment_id}.pdf"
+    filename = report_filename(report_format, assessment_id)
     return Response(
         pdf,
         media_type="application/pdf",

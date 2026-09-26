@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -18,8 +20,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import NullPool
 
 from analyzer.api.errors import PROBLEM_CONTENT_TYPE
+from analyzer.api.jobs import RunEvent
 from analyzer.api.main import API_PREFIX, create_app
 from analyzer.core.config import Settings
+from analyzer.core.enums import SmtpSecurity
 from analyzer.db.models import Base
 from analyzer.db.session import create_db_engine
 from analyzer.report.render import (
@@ -28,6 +32,7 @@ from analyzer.report.render import (
     pdf_backend_available,
 )
 from tests._pcap import DLT_EN10MB, esp_payload, eth_frame, ipv4_packet, udp_packet, write_pcap
+from tests._smtp import SmtpSink
 from tests.conftest import postgres_url
 
 BASELINE = Path(__file__).resolve().parents[1] / "src/analyzer/assess/policies/baseline.yaml"
@@ -68,23 +73,24 @@ def _pcap_bytes(tmp_path: Path, name: str = "cap.pcap", *, spi: int = 1) -> byte
     return path.read_bytes()
 
 
-@pytest_asyncio.fixture
-async def client(backend: str, tmp_path: Path) -> AsyncIterator[AsyncClient]:
-    """The API, over ASGI, against whichever backend `backend` selected.
+def _settings(backend: str, tmp_path: Path, **overrides: object) -> Settings:
+    fields: dict[str, object] = {
+        "database_url": _database_url(backend, tmp_path),
+        "storage_path": tmp_path / "captures",
+        "policy_path": BASELINE,
+        "model_dir": tmp_path / "models",
+        "max_upload_bytes": 64 * 1024 * 1024,
+        "max_concurrent_analyses": 2,
+        # Explicit, so an SMTP_HOST in a developer's .env cannot switch
+        # emailing on underneath a test that asserts it is off.
+        "smtp_host": None,
+        **overrides,
+    }
+    return Settings(**fields)  # type: ignore[arg-type] # keys are Settings fields
 
-    Step 11.2: the full API suite runs on SQLite *and* PostgreSQL. The
-    dual-backend requirement (LLD section 4.1) is about the whole stack, not
-    just the model layer -- an endpoint that works on SQLite and not on
-    Postgres is exactly the failure that survives a model-only test.
-    """
-    settings = Settings(
-        database_url=_database_url(backend, tmp_path),
-        storage_path=tmp_path / "captures",
-        policy_path=BASELINE,
-        model_dir=tmp_path / "models",
-        max_upload_bytes=64 * 1024 * 1024,
-        max_concurrent_analyses=2,
-    )
+
+@asynccontextmanager
+async def _serve(settings: Settings) -> AsyncIterator[AsyncClient]:
     engine = create_db_engine(settings.database_url, poolclass=NullPool)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
@@ -101,6 +107,41 @@ async def client(backend: str, tmp_path: Path) -> AsyncIterator[AsyncClient]:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def client(backend: str, tmp_path: Path) -> AsyncIterator[AsyncClient]:
+    """The API, over ASGI, against whichever backend `backend` selected.
+
+    Step 11.2: the full API suite runs on SQLite *and* PostgreSQL. The
+    dual-backend requirement (LLD section 4.1) is about the whole stack, not
+    just the model layer -- an endpoint that works on SQLite and not on
+    Postgres is exactly the failure that survives a model-only test.
+    """
+    async with _serve(_settings(backend, tmp_path)) as http:
+        yield http
+
+
+MAIL_RECIPIENT = "analyst@example.com"
+
+
+@pytest_asyncio.fixture
+async def mailing_client(
+    backend: str, tmp_path: Path, smtp_sink: SmtpSink
+) -> AsyncIterator[AsyncClient]:
+    """The same API with emailed reports switched on, delivering to `smtp_sink`."""
+    settings = _settings(
+        backend,
+        tmp_path,
+        smtp_host="127.0.0.1",
+        smtp_port=smtp_sink.port,
+        smtp_security=SmtpSecurity.NONE,
+        smtp_from="IPsec Analyzer <reports@analyzer.test>",
+        smtp_timeout_s=5.0,
+        dashboard_url="http://dashboard.test",
+    )
+    async with _serve(settings) as http:
+        yield http
 
 
 async def _upload(
@@ -467,3 +508,122 @@ async def test_missing_pdf_backend_is_a_503_that_names_the_remedy(
     # The two things the reader needs: the way out now, and the way to fix it.
     assert "?inline=1" in body["detail"]
     assert "GTK3" in body["detail"]
+
+
+# --- emailed reports ---------------------------------------------------------
+
+
+async def _start(client: AsyncClient, tmp_path: Path, **request: object) -> str:
+    capture = await _upload(client, tmp_path)
+    started = await client.post(f"{API_PREFIX}/captures/{capture['id']}/analyze", **request)
+    assert started.status_code == 202, started.text
+    return str(started.json()["runId"])
+
+
+async def _events(client: AsyncClient, run_id: str) -> list[RunEvent]:
+    """Everything the run emitted, via the bus's replay of a finished run."""
+    runner = client.app.state.job_runner  # type: ignore[attr-defined]
+    await runner.wait_for(UUID(run_id))
+    return [event async for event in runner.bus.subscribe(UUID(run_id))]
+
+
+async def test_an_address_is_refused_when_this_server_cannot_email(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """Refused before the run, not discovered after it: an analyst told "we
+    will email it" and then sent nothing has been told something false."""
+    capture = await _upload(client, tmp_path)
+    response = await client.post(
+        f"{API_PREFIX}/captures/{capture['id']}/analyze", json={"notifyEmail": MAIL_RECIPIENT}
+    )
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith(PROBLEM_CONTENT_TYPE)
+    body = response.json()
+    assert body["capability"] == "email"
+    assert "SMTP_HOST" in body["detail"]
+    assert client.app.state.job_runner.queued_or_running == 0  # type: ignore[attr-defined]
+
+
+async def test_a_malformed_address_is_a_422(mailing_client: AsyncClient, tmp_path: Path) -> None:
+    capture = await _upload(mailing_client, tmp_path)
+    response = await mailing_client.post(
+        f"{API_PREFIX}/captures/{capture['id']}/analyze", json={"notifyEmail": "not-an-address"}
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith(PROBLEM_CONTENT_TYPE)
+    assert any("notifyEmail" in error["loc"] for error in response.json()["errors"])
+
+
+async def test_an_empty_json_body_starts_an_ordinary_run(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """The dashboard now always sends a JSON body, and `{}` when no address
+    was given. That must behave exactly like the bodiless POST it replaced."""
+    events = await _events(client, await _start(client, tmp_path, json={}))
+
+    assert events[-1].event == "complete"
+    assert "email" not in events[-1].data
+
+
+@needs_pdf_backend
+async def test_a_completed_run_emails_both_reports(
+    mailing_client: AsyncClient, smtp_sink: SmtpSink, tmp_path: Path
+) -> None:
+    run_id = await _start(mailing_client, tmp_path, json={"notifyEmail": MAIL_RECIPIENT})
+    events = await _events(mailing_client, run_id)
+
+    stages = [event.data["stage"] for event in events if event.event == "progress"]
+    assert stages[-1] == "report"
+    complete = events[-1]
+    assert complete.event == "complete"
+    assert complete.data["email"] == {"status": "sent"}
+
+    assessment_id = complete.data["assessmentId"]
+    [received] = smtp_sink.received
+    assert received.rcpt_tos == [MAIL_RECIPIENT]
+    attachments = list(received.message.iter_attachments())
+    assert [a.get_filename() for a in attachments] == [
+        f"ipsec-executive-{assessment_id}.pdf",
+        f"ipsec-technical-{assessment_id}.pdf",
+    ]
+    assert all(a.get_content().startswith(b"%PDF-") for a in attachments)
+    body = received.message.get_body(preferencelist=("plain",))
+    assert body is not None
+    assert f"http://dashboard.test/assessments/{assessment_id}" in body.get_content()
+
+
+@needs_pdf_backend
+async def test_a_failed_email_does_not_fail_the_run(
+    mailing_client: AsyncClient, smtp_sink: SmtpSink, tmp_path: Path
+) -> None:
+    """The assessment is persisted before sending starts, so the analyst still
+    gets it -- and the run still *completes*, which is the part that matters:
+    no `complete` event would leave the dashboard waiting forever."""
+    smtp_sink.refuse[MAIL_RECIPIENT] = "550 5.1.1 No such user"
+    run_id = await _start(mailing_client, tmp_path, json={"notifyEmail": MAIL_RECIPIENT})
+    events = await _events(mailing_client, run_id)
+
+    complete = events[-1]
+    assert complete.event == "complete"
+    assert complete.data["email"]["status"] == "failed"
+    assert "recipient" in complete.data["email"]["detail"]
+    assert smtp_sink.received == []
+
+    run = await mailing_client.get(f"{API_PREFIX}/runs/{run_id}")
+    assert run.json()["status"] == "succeeded"
+    document = await mailing_client.get(f"{API_PREFIX}/assessments/{complete.data['assessmentId']}")
+    assert document.status_code == 200
+
+
+async def test_a_run_without_an_address_sends_nothing(
+    mailing_client: AsyncClient, smtp_sink: SmtpSink, tmp_path: Path
+) -> None:
+    """Configuring SMTP makes emailing *possible*; only the analyst's own
+    request makes it happen."""
+    events = await _events(mailing_client, await _start(mailing_client, tmp_path))
+
+    assert "email" not in events[-1].data
+    assert all(event.data.get("stage") != "report" for event in events)
+    assert smtp_sink.received == []

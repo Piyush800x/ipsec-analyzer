@@ -22,9 +22,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from analyzer.core.enums import SmtpSecurity
 
 _CORE_DIR = Path(__file__).resolve().parent
 _BACKEND_DIR = _CORE_DIR.parents[2]
@@ -107,6 +110,42 @@ class Settings(BaseSettings):
         description="Bounds concurrent pipeline runs (LLD section 9).",
     )
 
+    smtp_host: str | None = Field(
+        default=None,
+        description="SMTP server for emailed reports. Unset disables emailing entirely.",
+    )
+    """Off by default, and the offline stack leaves it off. Emailing a report
+    sends assessment content off this machine, which NFR-6 otherwise rules out,
+    so it takes an operator setting this *and* an analyst asking per run."""
+
+    smtp_port: int | None = Field(
+        default=None,
+        gt=0,
+        le=65535,
+        description="Defaults to 587 for starttls, 465 for ssl, 25 for none.",
+    )
+
+    smtp_security: SmtpSecurity = Field(default=SmtpSecurity.STARTTLS)
+
+    smtp_username: str | None = Field(default=None)
+
+    smtp_password: SecretStr | None = Field(default=None)
+
+    smtp_from: str | None = Field(
+        default=None,
+        description="From: header, e.g. 'IPsec Analyzer <reports@example.com>'.",
+    )
+    """Required whenever ``smtp_host`` is set, rather than falling back to the
+    username: SendGrid's username is the literal ``apikey`` and a From: header
+    of ``apikey`` is rejected by every receiving server worth sending to."""
+
+    smtp_timeout_s: float = Field(default=30.0, gt=0)
+
+    dashboard_url: str | None = Field(
+        default=None,
+        description="Public URL of the dashboard, linked from emailed reports.",
+    )
+
     @field_validator("database_url", "database_url_direct")
     @classmethod
     def _check_driver(cls, value: str | None) -> str | None:
@@ -130,6 +169,19 @@ class Settings(BaseSettings):
             raise ValueError(msg)
 
         return value
+
+    @model_validator(mode="after")
+    def _check_smtp(self) -> Self:
+        """A half-configured mailer fails here, not at the end of someone's run."""
+        if self.smtp_host is None:
+            return self
+        if not self.smtp_from:
+            msg = "SMTP_HOST is set but SMTP_FROM is not. Set the address reports are sent from."
+            raise ValueError(msg)
+        if (self.smtp_username is None) != (self.smtp_password is None):
+            msg = "SMTP_USERNAME and SMTP_PASSWORD must be set together, or both left unset."
+            raise ValueError(msg)
+        return self
 
     @property
     def migration_url(self) -> str:
@@ -167,9 +219,12 @@ def _explain(exc: ValidationError) -> str:
     """Turn a pydantic report into instructions."""
     lines = ["Configuration error. The application cannot start.", ""]
     for error in exc.errors():
-        field = ".".join(str(part) for part in error["loc"]) or "(root)"
+        field = ".".join(str(part) for part in error["loc"])
         env_name = field.upper()
-        if error["type"] == "missing":
+        if not field:
+            # A model validator spanning several variables; its message names them.
+            lines.append(f"  {str(error['msg']).removeprefix('Value error, ')}")
+        elif error["type"] == "missing":
             lines.append(f"  {env_name} is not set.")
         else:
             lines.append(f"  {env_name}: {error['msg']}")

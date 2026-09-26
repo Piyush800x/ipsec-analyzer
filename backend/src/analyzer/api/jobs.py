@@ -34,9 +34,10 @@ from analyzer.api.pipeline import (
     persist_assessment,
 )
 from analyzer.assess.engine import AssessmentEngine
-from analyzer.core.enums import RunStage, RunStatus
+from analyzer.core.enums import EmailDelivery, RunStage, RunStatus
 from analyzer.core.schema import Assessment as AssessmentDocument
 from analyzer.db import models
+from analyzer.report.mail import ReportEmailError, ReportMailer
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ class JobRunner:
         engine_version: str,
         model_dir: Path | None = None,
         use_process_pool: bool = True,
+        mailer: ReportMailer | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._engine = engine
@@ -142,6 +144,7 @@ class JobRunner:
         docker-compose.offline.yml, and never reached this call.
         """
         self._pool: ProcessPoolExecutor | None = ProcessPoolExecutor() if use_process_pool else None
+        self._mailer = mailer
         self.bus = EventBus()
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -149,8 +152,14 @@ class JobRunner:
     def queued_or_running(self) -> int:
         return len([task for task in self._tasks if not task.done()])
 
-    def submit(self, run_id: UUID, capture_id: UUID, pcap_path: Path) -> None:
-        task = asyncio.create_task(self._run(run_id, capture_id, pcap_path))
+    @property
+    def can_email(self) -> bool:
+        return self._mailer is not None
+
+    def submit(
+        self, run_id: UUID, capture_id: UUID, pcap_path: Path, *, notify_email: str | None = None
+    ) -> None:
+        task = asyncio.create_task(self._run(run_id, capture_id, pcap_path, notify_email))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -177,7 +186,9 @@ class JobRunner:
         if self._pool is not None:
             self._pool.shutdown(wait=False, cancel_futures=True)
 
-    async def _run(self, run_id: UUID, capture_id: UUID, pcap_path: Path) -> None:
+    async def _run(
+        self, run_id: UUID, capture_id: UUID, pcap_path: Path, notify_email: str | None
+    ) -> None:
         self.bus.publish(
             run_id,
             RunEvent(
@@ -204,10 +215,61 @@ class JobRunner:
                 return
 
             assessment_id = await self._persist(run_id, document)
-            self.bus.publish(
-                run_id,
-                RunEvent("complete", {"runId": str(run_id), "assessmentId": str(assessment_id)}),
+            complete: dict[str, Any] = {"runId": str(run_id), "assessmentId": str(assessment_id)}
+            if notify_email is not None:
+                complete["email"] = await self._email_reports(
+                    run_id, document, assessment_id, notify_email
+                )
+            self.bus.publish(run_id, RunEvent("complete", complete))
+
+    async def _email_reports(
+        self, run_id: UUID, document: AssessmentDocument, assessment_id: UUID, recipient: str
+    ) -> dict[str, str]:
+        """Email both reports and return the outcome for the ``complete`` event.
+
+        Never raises. The assessment is already persisted, so a mail failure
+        is not an analysis failure. More to the point, an exception escaping
+        here would skip the ``complete`` event entirely, and every dashboard
+        watching this run would wait forever on a run that has finished.
+        """
+        if self._mailer is None:
+            # The analyze route refuses an address when this is None, so this
+            # is reachable only by calling submit() directly.
+            return {
+                "status": EmailDelivery.FAILED.value,
+                "detail": "Emailing reports is not configured on this server.",
+            }
+
+        self.bus.publish(
+            run_id,
+            RunEvent(
+                "progress",
+                {
+                    "runId": str(run_id),
+                    "stage": RunStage.REPORT.value,
+                    "progress": STAGE_PROGRESS[RunStage.ASSESS],
+                    "message": "rendering and emailing the reports",
+                },
+            ),
+        )
+        try:
+            await asyncio.to_thread(self._mailer.deliver, document, assessment_id, recipient)
+        except ReportEmailError as exc:
+            log.warning(
+                "could not email the reports for assessment %s: %s (%r)",
+                assessment_id,
+                exc,
+                exc.__cause__,
             )
+            return {"status": EmailDelivery.FAILED.value, "detail": str(exc)}
+        except Exception:
+            log.exception("emailing the reports for assessment %s failed", assessment_id)
+            return {
+                "status": EmailDelivery.FAILED.value,
+                "detail": "The reports could not be emailed. See the server log for details.",
+            }
+        log.info("emailed the reports for assessment %s", assessment_id)
+        return {"status": EmailDelivery.SENT.value}
 
     async def _analyse(self, run_id: UUID, capture_id: UUID, pcap_path: Path) -> Any:
         loop = asyncio.get_running_loop()

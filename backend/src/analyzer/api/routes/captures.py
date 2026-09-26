@@ -18,14 +18,21 @@ from typing import Annotated, Final
 from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import APIRouter, File, Query, Request, UploadFile, status
+from fastapi import APIRouter, Body, File, Query, Request, UploadFile, status
 
 from analyzer.api.deps import SessionDep, SettingsDep, StorageDep
-from analyzer.api.errors import NotFoundError, PayloadTooLargeError, ValidationError
-from analyzer.api.schemas import AnalyzeAccepted, CapturePage, CaptureSummary
+from analyzer.api.errors import (
+    DependencyUnavailableError,
+    NotFoundError,
+    PayloadTooLargeError,
+    ValidationError,
+)
+from analyzer.api.jobs import JobRunner
+from analyzer.api.schemas import AnalyzeAccepted, AnalyzeRequest, CapturePage, CaptureSummary
 from analyzer.core.enums import CaptureSource, RunStatus
 from analyzer.core.ids import new_id
 from analyzer.db import models
+from analyzer.report.render import PDF_BACKEND_HINT, pdf_backend_available
 
 router = APIRouter(prefix="/captures", tags=["captures"])
 
@@ -159,19 +166,44 @@ async def delete_capture(session: SessionDep, capture_id: UUID) -> None:
     stored.unlink(missing_ok=True)
 
 
+def _check_can_email(runner: JobRunner) -> None:
+    """Refuse an address this deployment cannot deliver to, before the run.
+
+    Checked up front rather than discovered when the run finishes: an analyst
+    who asked for the reports by email and got a silent nothing a minute later
+    has been told something false. Both refusals are 503s because the request
+    is fine and an operator's install is what is missing.
+    """
+    if not runner.can_email:
+        raise DependencyUnavailableError(
+            "Emailing reports is not configured on this server. An operator enables it "
+            "by setting SMTP_HOST and SMTP_FROM (see .env.example). The analysis does "
+            "not need it: start it again without an email address.",
+            capability="email",
+        )
+    if not pdf_backend_available():
+        raise DependencyUnavailableError(PDF_BACKEND_HINT, capability="pdf")
+
+
 @router.post(
     "/{capture_id}/analyze",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AnalyzeAccepted,
 )
 async def start_analysis(
-    request: Request, session: SessionDep, capture_id: UUID
+    request: Request,
+    session: SessionDep,
+    capture_id: UUID,
+    body: Annotated[AnalyzeRequest | None, Body()] = None,
 ) -> AnalyzeAccepted:
     capture = await _get_capture(session, capture_id)
     if not Path(capture.storage_path).exists():
         raise NotFoundError("stored capture file for capture", capture_id)
 
-    runner = request.app.state.job_runner
+    runner: JobRunner = request.app.state.job_runner
+    notify_email = body.notify_email if body is not None else None
+    if notify_email is not None:
+        _check_can_email(runner)
     engine = request.app.state.assessment_engine
     run = models.AnalysisRun(
         id=new_id(),
@@ -194,5 +226,5 @@ async def start_analysis(
     # tears it down would stall the job for the length of the request.
     await session.commit()
 
-    runner.submit(run_id, capture_uuid, storage_path)
+    runner.submit(run_id, capture_uuid, storage_path, notify_email=notify_email)
     return AnalyzeAccepted(run_id=run_id, capture_id=capture_uuid, status=RunStatus.QUEUED)

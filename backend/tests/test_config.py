@@ -25,6 +25,13 @@ ENV_VARS = (
     "MODEL_DIR",
     "MAX_UPLOAD_BYTES",
     "MAX_CONCURRENT_ANALYSES",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_SECURITY",
+    "SMTP_USERNAME",
+    "SMTP_PASSWORD",
+    "SMTP_FROM",
+    "DASHBOARD_URL",
 )
 
 SQLITE_URL = "sqlite+aiosqlite:///./data/analyzer.db"
@@ -200,3 +207,48 @@ def test_offline_posture_is_reported_honestly(monkeypatch: pytest.MonkeyPatch) -
 def test_settings_are_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", SQLITE_URL)
     assert get_settings() is get_settings()
+
+
+# --------------------------------------------------------------------------
+# Emailed reports: a half-configured mailer fails at startup, not mid-run
+# --------------------------------------------------------------------------
+
+
+def test_smtp_host_without_a_sender_refuses_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otherwise the first analyst to ask for an email finds out, a minute into
+    their run, that it was never going to be sent."""
+    monkeypatch.setenv("DATABASE_URL", SQLITE_URL)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        get_settings()
+
+    message = str(exc_info.value)
+    assert "SMTP_FROM is not" in message
+    assert "Value error" not in message  # pydantic's prefix, stripped for the reader
+
+
+def test_smtp_username_without_a_password_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", SQLITE_URL)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_FROM", "reports@example.com")
+    monkeypatch.setenv("SMTP_USERNAME", "reports@example.com")
+
+    with pytest.raises(ConfigurationError, match="SMTP_USERNAME and SMTP_PASSWORD"):
+        get_settings()
+
+
+def test_smtp_settings_load_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", SQLITE_URL)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_SECURITY", "ssl")
+    monkeypatch.setenv("SMTP_FROM", "IPsec Analyzer <reports@example.com>")
+    monkeypatch.setenv("SMTP_USERNAME", "reports@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "app-password")
+
+    settings = get_settings()
+    assert settings.smtp_security == "ssl"
+    assert settings.smtp_password is not None
+    assert settings.smtp_password.get_secret_value() == "app-password"

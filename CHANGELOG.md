@@ -17,6 +17,127 @@ say so under Not verified rather than leaving it implied.
 
 ## [Unreleased]
 
+### Added — download the PDF reports from the dashboard, and email them when a run completes
+
+A user request, outside the implementation plan.
+
+**Download.** `GET /assessments/{id}/report?format=...` has existed since step
+10.4, but nothing in the dashboard called it, so FR-6.6/6.7 were reachable
+only by typing the URL. `ReportDownloads` adds **Executive PDF** and
+**Technical PDF** buttons to the assessment header and to the finished-run
+view. They use `fetch` and a blob rather than a plain link, so a deployment
+without WeasyPrint's native libraries shows its 503's `detail` (the fix)
+instead of saving that JSON as a `.pdf`. They are hidden under `USE_FIXTURES`,
+where there is no backend to render anything.
+
+**Email.** The capture page takes an optional address with **Analyse this
+capture**. When the run's assessment is persisted, the job runner renders both
+PDFs and sends them over SMTP (`report/mail.py`, stdlib `smtplib` in a worker
+thread). The attachments are the same `render_pdf` output under the same
+`report_filename()` as the downloads: verified byte-identical in the
+walkthrough below. The body gives the score, the finding counts, the same top
+three risks the executive report leads with (`render.top_risks()`, now shared),
+and a link to the assessment when `DASHBOARD_URL` is set.
+
+- Off unless an operator sets `SMTP_HOST` + `SMTP_FROM` (`.env.example`
+  documents it, Gmail included). Half a configuration (a host with no sender,
+  a username with no password) refuses to start rather than failing at the
+  end of someone's run.
+- An address sent to a server that cannot email is refused **before** the run
+  starts: 503, `capability: "email"` (or `"pdf"` if WeasyPrint is missing),
+  and no run is created. Saying "we will email it" and then sending nothing
+  would be the worse failure.
+- A failed send does not fail the run. The assessment is already persisted,
+  and `_email_reports` never raises: an exception there would have skipped the
+  `complete` event and left the dashboard waiting forever. The outcome rides
+  on `complete` as `email: {status: sent|failed, detail?}` (`EmailDelivery`
+  in `core/enums.py`). `detail` is our own sentence, never the SMTP server's
+  reply, which is free text someone else controls.
+- `SmtpConfig` keeps the password out of its `repr`; `Settings` holds it as a
+  `SecretStr`.
+- PDF renders are now serialised by a lock in `render_pdf`: downloads render on
+  the event-loop thread and emailed reports on a worker thread, and WeasyPrint
+  promises nothing about concurrent use of the native libraries beneath it.
+
+**Why SMTP from the backend, not EmailJS or Nodemailer (both were suggested).**
+The run completes in the Python process and the PDF is rendered there. EmailJS
+runs in the browser: it sends only while the tab stays open, caps attachment
+size below the technical report on its free tier, and routes report content
+through a third party. Nodemailer would have to run in the Next.js server,
+which never learns that a run finished. `smtplib` needs no new runtime
+dependency and uses the same SMTP settings either library would have needed.
+
+**Found and fixed on the way: an address typed before hydration was silently
+dropped.** Driving the page in a real browser, the first run started with *no*
+address although the field visibly held one. Text typed into the
+server-rendered input before React hydrated never reached `onChange`, so the
+controlled input's state stayed empty. `AnalyzeButton` now reads the address
+from the form at submit time. Re-run with the address typed before hydration
+(`hydrated before typing: False`): delivered.
+
+Tests: `test_report_mail.py` (18) sends through a real aiosmtpd server on
+loopback (`tests/_smtp.py`), covering attachments, headers, AUTH, a refused
+recipient, a dead server and a missing PDF backend. `test_api.py` adds six
+tests on both backends: the 503, the 422, `{}` behaving like no body, a
+delivered run, a failed delivery that still completes, and SMTP configured but
+no address given. `test_config.py` adds three.
+
+Verified end to end on 2026-09-26 against the running stack (uvicorn + the
+production `next start` build + a local SMTP sink), driving headless Chrome
+over CDP through the real UI with `dataset/demo/demo-tunnel-a/capture.pcap`.
+The address was typed and the analysis started. The stage list gained
+*Emailing reports*, and the page said *Both PDF reports were emailed to
+analyst@example.com*. The sink received one message with both PDFs,
+byte-identical to what the two download buttons then saved. With the sink
+stopped, the run still completed and showed *...could not be emailed: Could not
+connect to the mail server*, and both downloads still worked. MT-28.
+
+### Deviations from the specs — emailed reports
+
+- **LLD §9 SSE:** `complete` gains an optional `email` member, and the
+  `report` stage (in `RunStage` since step 1.1, never emitted until now) is
+  emitted while emailing. Additive: a run with no address emits exactly what
+  it did before.
+- **LLD §9 API:** `POST /captures/{id}/analyze` takes an optional JSON body,
+  `{"notifyEmail": "..."}`. No body at all still works; `generated.ts` is
+  regenerated.
+- **NFR-6** ("no external service calls"): emailing sends the *reports* (never
+  the capture) to an SMTP server. It takes two opt-ins, an operator's
+  `SMTP_HOST` and an analyst's address per run, and the offline compose file
+  sets neither. The LLD and PRD do not mention email at all; they should, if
+  this stays.
+- **New dependencies:** `email-validator` at runtime (pulls in `dnspython`);
+  `aiosmtpd` in `dev`.
+
+### Not verified — emailed reports
+
+- **TLS.** `starttls` and `ssl` have not been run against a real provider; the
+  loopback sink has no certificate, so every automated send uses
+  `SMTP_SECURITY=none`. MT-29 is the check, and it has not been run.
+- **Deliverability.** Nothing here says whether Gmail or Outlook file the
+  message as spam. `Date` and `Message-ID` are set (smtplib adds neither), and
+  that is all.
+- **Abuse.** The API has no authentication, so anyone who can reach it can have
+  it email a report of any capture to any address. That is the API's existing
+  trust model, but email makes it outward-facing. Put auth in front before
+  exposing this beyond a trusted network. There is no rate limit.
+- **Restart mid-run.** The address lives only in the job runner's memory, so a
+  restart loses it along with the run itself (the same behaviour runs already
+  had). The delivery outcome is on the SSE stream only, not on `GET /runs/{id}`.
+
+### Noticed, not fixed
+
+- The `/api/[...path]` proxy forwards `Expect: 100-continue`, which undici
+  rejects (`UND_ERR_NOT_SUPPORTED`), so `curl -F` uploads over ~1 KB through
+  the dashboard return 500. Browsers never send the header; `curl -H 'Expect:'`
+  works around it. The header belongs in the proxy's hop-by-hop list.
+- `test_messaging_peer.py::test_a_seed_replays` fails intermittently under CPU
+  load with `ConnectionRefusedError`: `_conversation` starts the server thread
+  and connects without waiting for it to listen. It passes on the unchanged
+  tree and on a retry.
+- `scripts/pg-dev.sh` is committed as `100644`, so `./scripts/pg-dev.sh up` as
+  documented fails with "Permission denied"; `bash scripts/pg-dev.sh up` works.
+
 ### Fixed — clicking an uploaded capture 404'd; `/captures/[id]` did not exist
 
 Found by hand: uploading a PCAP through the dashboard and clicking its row

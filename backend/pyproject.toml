@@ -29,6 +29,9 @@ dependencies = [
     # UNAVAILABLE. Found by cloning the repo clean and watching it happen.
     # A few megabytes; torch and scikit-learn stay in the `ml` group below.
     "lightgbm>=4.5",
+    # Backs pydantic's EmailStr on the analyze request's optional notifyEmail.
+    # Syntax only: pydantic never asks it for the DNS deliverability check.
+    "email-validator>=2.2",
 ]
 
 [dependency-groups]
@@ -39,6 +42,8 @@ dev = [
     "pytest-asyncio>=0.24",
     "types-pyyaml>=6.0.12.20260815",
     "httpx>=0.28.1",
+    # A real SMTP server on loopback for the emailed-report tests (tests/_smtp.py).
+    "aiosmtpd>=1.4",
 ]
 testbed = [
     "docker>=7.2.0",
