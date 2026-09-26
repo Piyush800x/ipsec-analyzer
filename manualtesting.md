@@ -68,7 +68,7 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-17 | Both reports read correctly to their audience | 10.2, 10.3 | 2026-09-05 | Pass |
 | MT-18 | The offline stack runs with no outbound network | 11.4 | 2026-09-07 | Pass |
 | MT-19 | Demo rehearsal, three clean runs | 11.6 | 2026-09-07 | Pass (3/3, 21s) |
-| MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-26 | Pass (Windows re-run; Linux last 2026-09-06, re-run owed) |
+| MT-20 | The backend starts and reports on Windows *and* Linux | cross-platform | 2026-09-06 | Pass (both) |
 | MT-21 | A real capture goes through the running API end to end | 6.7, 10.4 | 2026-09-06 | Pass |
 | MT-22 | Every traffic class carries real traffic over IPv6 | 2.6, 8.3 | 2026-09-07 | Pass |
 | MT-23 | Concurrent shards produce one complete, disjoint dataset | 8.3 | 2026-09-07 | Pass |
@@ -78,7 +78,6 @@ export TEST_POSTGRES_URL="$(./scripts/pg-dev.sh url)"
 | MT-27 | Upload → click capture → analyse → assessment, in a browser | 7.5, 7.6 | 2026-09-08 | Pass (curl-verified; browser walkthrough still owed) |
 | MT-28 | Download both PDFs, and email them on completion, in a browser | reports (user request) | 2026-09-26 | Pass (headless Chrome over CDP, local SMTP sink) |
 | MT-29 | Emailed reports reach a real mailbox over TLS | reports (user request) | — | **Not run** |
-| MT-30 | Portable-engine PDFs read correctly, and emailing works without GTK | reports (cross-platform) | 2026-09-26 | Pass (Windows, loopback SMTP; see note) |
 
 ---
 
@@ -863,22 +862,22 @@ curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
   "localhost:8000/api/v1/assessments/<id>/report?format=technical"
 ```
 
-**Expect** (revised 2026-09-26: PDFs now render without WeasyPrint)
+**Expect**
 
 | | Windows, no GTK | Linux, WeasyPrint installed |
 |---|---|---|
-| `pytest` | passes; only the *weasyprint* engine variants **skipped** | passes, both engines **run** |
+| `pytest` | passes, PDF tests **skipped** | passes, PDF tests **run** |
 | server startup | clean | clean |
 | `/health` | `{"status":"ok",...}` | same |
 | report `?inline=1` | `200 text/html` | `200 text/html` |
-| report as PDF | `200 application/pdf` (xhtml2pdf) | `200 application/pdf` (WeasyPrint) |
+| report as PDF | `503 application/problem+json` | `200 application/pdf` |
 
-**Watch for** a 503 on the PDF on either OS: that is the regression this
-check now exists to catch. On Windows, the server log should carry the
-"rendered with the portable xhtml2pdf engine" warning **once**, followed by
-WeasyPrint's installation banner once; seeing either repeat across PDF
-requests means the failed-import cache regressed and the dlopen probe is
-re-running per request.
+**Watch for** the 503's `detail` naming both the way out now (`?inline=1`)
+and the fix (the GTK3 runtime). A 503 with a bare title is the failure this
+check exists to catch — it leaves the reader with a dead end. Also watch for
+WeasyPrint's multi-line installation banner appearing on stdout more than
+once across repeated PDF requests: that means the failed-import cache
+regressed and the dlopen probe is re-running per request.
 
 > Last verified 2026-09-06 · Windows 10 Pro 19045 **and** Linux 7.0.0-30-generic ·
 > **Pass on both.** The Linux column was confirmed against a running server:
@@ -886,13 +885,6 @@ re-running per request.
 > `?inline=1` returned `200 text/html; charset=utf-8`, and the PDF returned
 > `200 application/pdf`. The WeasyPrint banner did not reappear across repeated
 > requests, so the failed-import cache is holding.
->
-> Re-run 2026-09-26 · Windows 10 Pro 19045, no GTK · **Pass (Windows column
-> only).** Real uvicorn with the process pool, throwaway SQLite, capture
-> `dataset/sessions/weak-reference`: `/health` ok, both report formats
-> `200 application/pdf` (44 870 and 76 666 bytes), the portable-engine warning
-> and the WeasyPrint banner logged once each. The Linux column was not re-run
-> after this change; its WeasyPrint path is unchanged, but it is owed.
 
 ---
 
@@ -1332,49 +1324,3 @@ Gmail that means the account password was used instead of an App Password.
 
 > Last verified — · **Not run**. Needs a real mailbox and credentials.
 
-
----
-
-## MT-30 — Portable-engine PDFs read correctly, and emailing works without GTK
-
-**Proves** that on a machine without WeasyPrint's native libraries (stock
-Windows) the PDF reports still render, read correctly to a person, and go out
-by email. Before this, giving an address on the capture page was refused with
-a 503 about the GTK3 runtime, before the run even started.
-
-The suite proves the PDFs parse and carry the right text
-(`test_the_pdf_carries_the_report_content`, per engine). It cannot prove the
-page *looks* right: xhtml2pdf supports a CSS 2.1 subset, and its failures are
-visual (a border drawn around every child block, a glyph printed as a blank
-box) rather than exceptions.
-
-On a machine without GTK, start the backend and the dashboard as in MT-28,
-analyse a capture **with** an email address, and open both PDFs — the emailed
-attachments and the downloads.
-
-**Expect**
-- The analyze request is accepted (no red 503 under the button), the run
-  shows *Emailing reports*, then the green "Both PDF reports were emailed".
-- Each page has the report title top right and `IPsec VPN Protocol Analyzer
-  Page N of M` bottom left.
-- The score, rating and metadata exposure stacked plainly at the top, with no
-  boxes around them; severity chips coloured; `observed`/`inferred` coloured;
-  undetermined values in italic with their reason.
-- `·`, `—`, `−` and `≥` print as themselves. The SA heading shows `src -> dst`
-  (Vera has no arrow glyph; the substitution is deliberate).
-
-**Watch for** empty boxes where a character should be: a new non-ASCII
-character has reached a template or the policy without a Vera glyph. The
-suite's `test_portable_engine_has_a_glyph_for_everything_the_reports_print`
-scans the fixtures, so a character that appears only in real captures'
-text can slip past it.
-
-> Last verified 2026-09-26 · Windows 10 Pro 19045, no GTK · **Pass**, with
-> two caveats. Driven through a real uvicorn server and a loopback SMTP sink
-> (`tests/_smtp.py`), not the dashboard in a browser: analyze with an address
-> returned `202`, the run completed with `email: {status: sent}`, and two PDF
-> attachments arrived the same size as the downloads. Read page by page: the
-> `weak` fixture's executive (2 pages) and technical (8 pages) reports, and
-> the emailed executive report for `weak-reference`; the checklist above
-> held. Not read by eye: the `strong` fixture's PDFs and the live technical
-> report. Still owed: the browser walkthrough, and a real mailbox (MT-29).

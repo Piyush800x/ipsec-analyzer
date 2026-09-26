@@ -22,11 +22,6 @@ dependencies = [
     "polars>=1.44.1",
     "numpy>=2.4.6",
     "weasyprint>=69.0",
-    # The portable PDF engine. WeasyPrint needs Pango/Cairo/GObject from the
-    # system, which stock Windows never has; xhtml2pdf is pure Python over
-    # reportlab, whose wheel also ships the font the reports use. So PDFs render
-    # on any machine `uv sync` works on. See report/render.py.
-    "xhtml2pdf>=0.2.20",
     "jinja2>=3.1.6",
     # Runtime, not training-only: inference loads the LightGBM traffic and mode
     # classifiers, so without this a plain `uv sync` gives a checkout whose
@@ -49,7 +44,6 @@ dev = [
     "httpx>=0.28.1",
     # A real SMTP server on loopback for the emailed-report tests (tests/_smtp.py).
     "aiosmtpd>=1.4",
-    "pypdf>=6.19.0",
 ]
 testbed = [
     "docker>=7.2.0",
@@ -153,7 +147,7 @@ packages = ["analyzer", "testbed"]
 exclude = "^testbed/image/"
 
 [[tool.mypy.overrides]]
-module = ["uuid6.*", "docker.*", "dpkt.*", "weasyprint.*", "xhtml2pdf.*", "reportlab.*"]
+module = ["uuid6.*", "docker.*", "dpkt.*", "weasyprint.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
