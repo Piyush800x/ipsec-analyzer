@@ -174,6 +174,9 @@ def send_message(config: SmtpConfig, message: EmailMessage) -> None:
 
     The ``except`` order matters: every ``smtplib`` exception subclasses
     ``OSError``, so the catch-all for connection failures has to come last.
+    ``SMTPNotSupportedError`` is caught at each call instead, because
+    ``starttls()`` and ``login()`` both raise it and only the call site says
+    which of the two the server lacks.
     """
     context = ssl.create_default_context()
     try:
@@ -184,9 +187,20 @@ def send_message(config: SmtpConfig, message: EmailMessage) -> None:
         )
         with client:
             if config.security is SmtpSecurity.STARTTLS:
-                client.starttls(context=context)
+                try:
+                    client.starttls(context=context)
+                except smtplib.SMTPNotSupportedError as exc:
+                    msg = "The mail server does not support STARTTLS; check SMTP_SECURITY."
+                    raise ReportEmailError(msg) from exc
             if config.username is not None and config.password is not None:
-                client.login(config.username, config.password)
+                try:
+                    client.login(config.username, config.password)
+                except smtplib.SMTPNotSupportedError as exc:
+                    msg = (
+                        "The mail server does not accept logins on this connection; check "
+                        "SMTP_SECURITY, or unset SMTP_USERNAME and SMTP_PASSWORD."
+                    )
+                    raise ReportEmailError(msg) from exc
             client.send_message(message)
     except smtplib.SMTPAuthenticationError as exc:
         msg = "The mail server rejected this server's SMTP credentials."
@@ -196,9 +210,6 @@ def send_message(config: SmtpConfig, message: EmailMessage) -> None:
         raise ReportEmailError(msg) from exc
     except smtplib.SMTPSenderRefused as exc:
         msg = "The mail server refused this server's sender address."
-        raise ReportEmailError(msg) from exc
-    except smtplib.SMTPNotSupportedError as exc:
-        msg = "The mail server does not support STARTTLS; check SMTP_SECURITY."
         raise ReportEmailError(msg) from exc
     except smtplib.SMTPException as exc:
         msg = "The mail server did not accept the message."

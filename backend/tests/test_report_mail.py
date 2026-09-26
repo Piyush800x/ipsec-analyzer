@@ -32,7 +32,7 @@ from analyzer.report.render import (
     report_filename,
     top_risks,
 )
-from tests._smtp import SmtpSink, free_port
+from tests._smtp import SmtpSink, free_port, throwaway_credential
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ASSESSMENT_ID = UUID("01920000-0000-7000-8000-00000000abcd")
@@ -145,18 +145,38 @@ def test_the_message_survives_a_real_smtp_conversation(smtp_sink: SmtpSink) -> N
 @pytest.mark.filterwarnings("ignore:Requiring AUTH while not requiring TLS")
 def test_credentials_are_used_when_configured() -> None:
     message = build_message(_weak(), ASSESSMENT_ID, FAKE_PDFS, sender=SENDER, recipient=RECIPIENT)
-    with SmtpSink(credentials=("reports", "s3cret")) as sink:
-        send_message(_config(sink.port, username="reports", password="s3cret"), message)
+    login, secret = throwaway_credential(), throwaway_credential()
+    with SmtpSink(credentials=(login, secret)) as sink:
+        send_message(_config(sink.port, username=login, password=secret), message)
         assert len(sink.received) == 1
 
 
 @pytest.mark.filterwarnings("ignore:Requiring AUTH while not requiring TLS")
 def test_wrong_credentials_are_reported_as_such() -> None:
     message = build_message(_weak(), ASSESSMENT_ID, FAKE_PDFS, sender=SENDER, recipient=RECIPIENT)
-    with SmtpSink(credentials=("reports", "s3cret")) as sink:
+    login, secret = throwaway_credential(), throwaway_credential()
+    with SmtpSink(credentials=(login, secret)) as sink:
         with pytest.raises(ReportEmailError, match="credentials"):
-            send_message(_config(sink.port, username="reports", password="wrong"), message)
+            send_message(
+                _config(sink.port, username=login, password=throwaway_credential()), message
+            )
         assert sink.received == []
+
+
+def test_a_server_without_login_is_not_blamed_on_starttls(smtp_sink: SmtpSink) -> None:
+    """``starttls()`` and ``login()`` raise the same exception when the server
+    lacks the feature. Reporting both as a STARTTLS problem sent an operator
+    to check the wrong setting; this is the case that did it."""
+    message = build_message(_weak(), ASSESSMENT_ID, FAKE_PDFS, sender=SENDER, recipient=RECIPIENT)
+    config = _config(
+        smtp_sink.port, username=throwaway_credential(), password=throwaway_credential()
+    )
+
+    with pytest.raises(ReportEmailError, match="does not accept logins") as exc_info:
+        send_message(config, message)
+
+    assert "STARTTLS" not in str(exc_info.value)
+    assert smtp_sink.received == []
 
 
 def test_a_refused_recipient_is_reported_without_echoing_the_server(
@@ -247,11 +267,15 @@ def test_an_explicit_port_wins() -> None:
 
 
 def test_the_password_is_unwrapped_only_at_the_last_moment() -> None:
+    secret = throwaway_credential()
     settings = _settings(
-        smtp_host="mail.example", smtp_from=SENDER, smtp_username="u", smtp_password="hunter2"
+        smtp_host="mail.example",
+        smtp_from=SENDER,
+        smtp_username=throwaway_credential(),
+        smtp_password=secret,
     )
-    assert "hunter2" not in repr(settings)
+    assert secret not in repr(settings)
     config = SmtpConfig.from_settings(settings)
     assert config is not None
-    assert "hunter2" not in repr(config)
-    assert config.password == "hunter2"
+    assert secret not in repr(config)
+    assert config.password == secret
