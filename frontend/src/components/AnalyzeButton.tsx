@@ -7,8 +7,7 @@
  * after it: the backend emails both PDFs itself when the run completes, so
  * the reports arrive even if this tab is closed long before then. A server
  * with no SMTP configured refuses the address with a 503 before any run
- * starts, and that `detail` is shown here as-is. PDF rendering is never the
- * reason: it works on every server, with or without WeasyPrint's libraries.
+ * starts, and that `detail` is shown here as-is.
  */
 
 import { type FormEvent, useState } from "react";

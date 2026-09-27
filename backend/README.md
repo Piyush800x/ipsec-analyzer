@@ -16,17 +16,11 @@ cp ../.env.example ../.env    # then fill it in
 assessment policy loader). Without them four test modules fail at *collection*,
 which reads like a broken checkout rather than a missing extra.
 
-PDF reports render on any machine `uv sync` works on, Windows included. Where
-WeasyPrint's system libraries are present it typesets them; where they are
-not, `xhtml2pdf` (pure Python) renders the same content with plainer layout,
-and the server logs one warning saying so. To get WeasyPrint's layout on
-Linux (the Docker image already has these):
+WeasyPrint also needs system Pango and Cairo, which uv cannot install:
 
 ```bash
 sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 fonts-dejavu-core
 ```
-
-On Windows that means the GTK3 runtime; it is optional.
 
 The only required setting is `DATABASE_URL`. For offline work:
 
