@@ -58,6 +58,7 @@ import select
 import socket
 import struct
 import sys
+import threading
 import time
 from collections.abc import Callable
 
@@ -290,19 +291,28 @@ class _Peer:
                 action()
 
 
-def serve(host: str, port: int, duration_s: float, seed: int) -> None:
+def serve(
+    host: str, port: int, duration_s: float, seed: int, ready: threading.Event | None = None
+) -> None:
     """The responding end, and the roster's presence source.
 
     Receipts every message it is sent and answers each *turn* with one reply
     burst; never opens a turn of its own. The asymmetry is deliberate -- two
     ends that both initiated would ratchet into a continuous exchange and lose
     the silences that define the class.
+
+    ``ready``, when given, is set the instant the socket is listening -- the
+    test harness runs this on a background thread and connects from the main
+    one, and without a signal to wait on that is a bind-before-connect race
+    against thread startup rather than the timing behaviour under test.
     """
     rng = random.Random(seed + 1)
     srv = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((host, port))
     srv.listen(1)
+    if ready is not None:
+        ready.set()
     srv.settimeout(max(duration_s, 1.0))
     try:
         conn, _ = srv.accept()

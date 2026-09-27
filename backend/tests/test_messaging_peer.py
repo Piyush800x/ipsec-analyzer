@@ -104,13 +104,16 @@ def _conversation(peer: ModuleType, duration_s: float, seed: int) -> list[tuple[
         captured.setdefault("peers", []).append(self)  # type: ignore[arg-type]
 
     peer._Peer.__init__ = spy_init  # type: ignore[method-assign]
+    listening = threading.Event()
     try:
         server = threading.Thread(
             target=original_serve,
-            args=("127.0.0.1", port, duration_s, seed),
+            args=("127.0.0.1", port, duration_s, seed, listening),
             daemon=True,
         )
         server.start()
+        if not listening.wait(timeout=10.0):
+            raise TimeoutError("messaging_peer.serve never started listening")
         original_send("127.0.0.1", port, duration_s, seed)
         server.join(timeout=duration_s + 10)
     finally:
